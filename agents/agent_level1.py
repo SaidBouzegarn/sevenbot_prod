@@ -19,6 +19,10 @@ from jinja2 import Environment, FileSystemLoader
 from langchain_openai import ChatOpenAI
 from langchain.globals import set_llm_cache
 from langchain_community.cache import InMemoryCache
+from agents.agent_base import BaseAgent
+from langchain_core.messages import trim_messages
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import START, MessagesState, StateGraph
 
 set_llm_cache(InMemoryCache())
 
@@ -28,18 +32,25 @@ set_llm_cache(InMemoryCache())
 ##########################################################################################
 
 class Level1State(BaseModel):
-    news: List[str]
-    insights: List[str]
-    domain_insights: List[str]
-    level1_conversation: Annotated[List[Union[AIMessage, BaseMessage]], add_messages]
+    level1_2_conversation: Annotated[List[Union[AIMessage, BaseMessage]], add_messages]
+    level1_3_conversation: Annotated[List[Union[AIMessage, BaseMessage]], add_messages]
     assistant_conversation: Annotated[List[Union[AIMessage, BaseMessage]], add_messages]
     domain_knowledge: Any
     mode: Literal["research", "converse"]
 
 class Level1Decision(BaseModel):
     reasoning: str
-    decision: Literal["search_more_information", "converse_with_level2"]
-    questions: List[str]
+    decision: Literal["search_more_information", "converse_with_superiors"]
+    content: List[str]
+
+
+
+# Define trimmer
+# count each message as 1 "token" (token_counter=len) and keep only the last two messages
+trimmer = trim_messages(strategy="last", max_tokens=3, token_counter=len)
+
+
+
 
 class Level1Agent(BaseAgent):
     def __init__(self, *args, **kwargs):
@@ -49,17 +60,50 @@ class Level1Agent(BaseAgent):
         self.jinja_env = Environment(loader=FileSystemLoader(self.prompt_dir))
 
     def _create_graph(self) -> StateGraph:
+        
         def level1_node(state: Level1State) -> Dict[str, Any]:
-            decision = self._make_decision(state)
             
-            if decision.decision == "search_more_information":
-                questions = decision.questions
-                state.assistant_conversation.extend([HumanMessage(content=q) for q in questions])
+            #we want to get the last message from the level 3 conversation or level2 conversation based on the one that has last msg
+            time1 = datetime.fromisoformat(state.level1_2_conversation[-1].timestamp)
+            time2 = datetime.fromisoformat(state.level1_3_conversation[-1].timestamp)
+
+            last_message = state.level1_2_conversation if time1 > time2 else state.level1_3_conversation
+            last_message = last_message[-1].content if last_message else "No messages from level 2 or level 3 yet."
+
+            if self.debug:
+                print(f"Last message: {last_message}")
+
+            decision_prompt = self.jinja_env.get_template('decision_prompt.j2').render(
+                last_message=last_message,
+                level1_2_conversation=trimmer.invoke(state.level1_2_conversation) if state.level1_2_conversation else "No messages from level 2 yet.",
+                level1_3_conversation=trimmer.invoke(state.level1_3_conversation) if state.level1_3_conversation else "No messages from level 3 yet.",
+                assistant_conversation=trimmer.invoke(state.assistant_conversation) if state.assistant_conversation else "No messages from assistant yet.",
+                tools=self.tools
+            )
+            system_prompt = self.jinja_env.get_template('system_prompt.j2').render(
+                tools=self.tools
+            )
+            messages = [SystemMessage(content=system_prompt)] + [BaseMessage(content=decision_prompt)]
+
+            structured_llm = self.llm.with_structured_output(Level1Decision)
+            response = structured_llm.invoke(messages)
+
+            if self.debug:
+                print(f"Reasoning: {response.reasoning}")
+                print(f"Decision: {response.decision}")
+                print(f"Content: {response.content}")
+                
+            if response.decision == "search_more_information":
+                questions = response.content
+                state.assistant_conversation.extend([BaseMessage(content=q) for q in questions])
                 state.mode = "research"
-            elif decision.decision == "converse_with_level2":
-                message = self._generate_level2_message(state)
-                state.level1_conversation.append(message)
-                state.mode = "converse"
+            elif response.decision == "converse_with_superiors":
+                message = self.create_message(response.content[0] if response.content else "")
+                if time1 > time2:
+                    state.level1_2_conversation.append(message)
+                else:
+                    state.level1_3_conversation.append(message)
+                state.mode = "converse_with_superiors"
             return state
 
         def assistant_node(state: Level1State) -> Dict[str, Any]:
@@ -134,41 +178,12 @@ class Level1Agent(BaseAgent):
 
         return workflow.compile(checkpointer=self.checkpointer, store=self.memory_store)
 
-    def _make_decision(self, state: Level1State) -> Level1Decision:
-        prompt = self.jinja_env.get_template('level1_decision_prompt.j2').render(
-            level1_conversation=state.level1_conversation,
-            assistant_conversation=state.assistant_conversation,
-            news=state.news,
-            insights=state.insights,
-            domain_insights=state.domain_insights,
-            tools=self.tools
-        )
-        
-        structured_llm = self.llm.with_structured_output(Level1Decision)
-        response = structured_llm.invoke([HumanMessage(content=prompt)])
 
-        if self.debug:
-            print(f"Reasoning: {response.reasoning}")
-            print(f"Decision: {response.decision}")
-            print(f"Questions: {response.questions}")
+##########################################################################################
+#################################### Level 2 agent #######################################
+##########################################################################################
 
-        return response
 
-    def _generate_level2_message(self, state: Level1State) -> AIMessage:
-        prompt = self.jinja_env.get_template('level1_to_level2_message_prompt.j2').render(
-            level1_conversation=state.level1_conversation,
-            assistant_conversation=state.assistant_conversation,
-            news=state.news,
-            insights=state.insights,
-            domain_insights=state.domain_insights
-        )
-
-        response = self.llm.invoke([HumanMessage(content=prompt)])
-
-        if self.debug:
-            print(f"Level2 Message: {response.content}")
-
-        return self.create_message(response.content)
 
 ##########################################################################################
 #################################### Level 3 agent #######################################

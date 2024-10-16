@@ -19,23 +19,36 @@ from jinja2 import Environment, FileSystemLoader
 from langchain_openai import ChatOpenAI
 from langchain.globals import set_llm_cache
 from langchain_community.cache import InMemoryCache
+from langchain_mistralai import ChatMistralAI
+from langchain_cohere import ChatCohere
+from langchain_groq import ChatGroq
+from langchain_google_vertexai import ChatVertexAI
+from datetime import datetime
 
 set_llm_cache(InMemoryCache())
 
-
+# Lists of model names for each provider
+OPENAI_MODELS = ["gpt-3.5-turbo", "gpt-4", "gpt-4-turbo-preview"]
+MISTRAL_MODELS = ["mistral-tiny", "mistral-small", "mistral-medium"]
+COHERE_MODELS = ["command", "command-light", "command-nightly"]
+GROQ_MODELS = ["llama2-70b-4096", "mixtral-8x7b-32768"]
+VERTEXAI_MODELS = ["chat-bison", "chat-bison@001", "codechat-bison", "codechat-bison@001"]
 
 def create_agent_message_class(agent_name: str) -> Type[AIMessage]:
     """Dynamically create a new message class for a specific agent."""
     return type(f"{agent_name}Message", (AIMessage,), {
         "__doc__": f"A message from the {agent_name} Agent.",
-        "agent_name": agent_name
+        "agent_name": agent_name,
+        "timestamp": datetime.now().isoformat()
+
     })
 
 class BaseAgent:
     def __init__(
         self,
         name: str,
-        llm: BaseLanguageModel,
+        llm: str,
+        llm_params: Dict[str, Any],
         tools: List[BaseTool] = None,
         system_message: Optional[str] = None,
         max_iterations: int = 10,
@@ -46,7 +59,7 @@ class BaseAgent:
     ):
         self.name = name
         self.MessageClass = create_agent_message_class(name)
-        self.llm = llm
+        self.llm = self._construct_llm(llm, llm_params)
         self.tools = tools or [DuckDuckGoSearchRun()]
         self.system_message = system_message
         self.max_iterations = max_iterations
@@ -56,8 +69,23 @@ class BaseAgent:
         self.kwargs = kwargs
         self.graph = self._create_graph()
 
+    def _construct_llm(self, llm_name: str, llm_params: Dict[str, Any]) -> BaseLanguageModel:
+        """Construct the appropriate LLM based on the input string and parameters."""
+        if llm_name in OPENAI_MODELS:
+            return ChatOpenAI(model_name=llm_name, **llm_params)
+        elif llm_name in MISTRAL_MODELS:
+            return ChatMistralAI(model=llm_name, **llm_params)
+        elif llm_name in COHERE_MODELS:
+            return ChatCohere(model=llm_name, **llm_params)
+        elif llm_name in GROQ_MODELS:
+            return ChatGroq(model=llm_name, **llm_params)
+        elif llm_name in VERTEXAI_MODELS:
+            return ChatVertexAI(model_name=llm_name, **llm_params)
+        else:
+            raise ValueError(f"Unsupported model: {llm_name}")
+
     def create_message(self, content: str) -> AIMessage:
-        return self.MessageClass(content=content, agent_name=self.name)
+        return self.MessageClass(content=content, agent_name=self.name, timestamp=datetime.now().isoformat())
 
     def _create_graph(self) -> StateGraph:
         raise NotImplementedError("Subclasses must implement this method")
@@ -105,3 +133,25 @@ class BaseAgent:
         if config:
             default_config.update(config)
         return self.graph.astream(state, default_config)
+
+    @staticmethod
+    def get_latest_message_list(list1: List[AIMessage], list2: List[AIMessage]) -> List[AIMessage]:
+        """
+        Compare two lists of messages and return the list with the most recent message.
+        If both lists are empty, return an empty list.
+        If one list is empty and the other is not, return the non-empty list.
+        """
+        if not list1 and not list2:
+            return []
+        if not list1:
+            return list2
+        if not list2:
+            return list1
+        
+        last_msg1 = list1[-1]
+        last_msg2 = list2[-1]
+        
+        time1 = datetime.fromisoformat(last_msg1.timestamp)
+        time2 = datetime.fromisoformat(last_msg2.timestamp)
+        
+        return list1 if time1 > time2 else list2
