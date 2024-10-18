@@ -18,3 +18,7 @@ ollama
 aura-cli
 langchain-experimental
 duckduckgo-search
+langchain-mistralai
+langchain-cohere
+langchain-groq
+langchain-google-vertexai

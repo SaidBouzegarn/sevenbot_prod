@@ -49,6 +49,8 @@ class BaseAgent:
         name: str,
         llm: str,
         llm_params: Dict[str, Any],
+        assistant_llm: str,
+        assistant_llm_params: Dict[str, Any],
         tools: List[BaseTool] = None,
         system_message: Optional[str] = None,
         max_iterations: int = 10,
@@ -58,34 +60,39 @@ class BaseAgent:
         **kwargs: Any
     ):
         self.name = name
+        self.tools = tools or [DuckDuckGoSearchRun()]
         self.MessageClass = create_agent_message_class(name)
         self.llm = self._construct_llm(llm, llm_params)
-        self.tools = tools or [DuckDuckGoSearchRun()]
+        self.assistant_llm = self._construct_llm(assistant_llm, assistant_llm_params, tools=True)
         self.system_message = system_message
         self.max_iterations = max_iterations
         self.checkpointer = checkpointer or MemorySaver()
         self.memory_store = memory_store or InMemoryStore()
         self.debug = debug
         self.kwargs = kwargs
-        self.graph = self._create_graph()
 
-    def _construct_llm(self, llm_name: str, llm_params: Dict[str, Any]) -> BaseLanguageModel:
+    def _construct_llm(self, llm_name: str, llm_params: Dict[str, Any], tools: bool = False) -> BaseLanguageModel:
         """Construct the appropriate LLM based on the input string and parameters."""
         if llm_name in OPENAI_MODELS:
-            return ChatOpenAI(model_name=llm_name, **llm_params)
+            llm = ChatOpenAI(model_name=llm_name, **llm_params)
         elif llm_name in MISTRAL_MODELS:
-            return ChatMistralAI(model=llm_name, **llm_params)
+            llm = ChatMistralAI(model=llm_name, **llm_params)
         elif llm_name in COHERE_MODELS:
-            return ChatCohere(model=llm_name, **llm_params)
+            llm = ChatCohere(model=llm_name, **llm_params)
         elif llm_name in GROQ_MODELS:
-            return ChatGroq(model=llm_name, **llm_params)
+            llm = ChatGroq(model=llm_name, **llm_params)
         elif llm_name in VERTEXAI_MODELS:
-            return ChatVertexAI(model_name=llm_name, **llm_params)
+            llm = ChatVertexAI(model_name=llm_name, **llm_params)
         else:
             raise ValueError(f"Unsupported model: {llm_name}")
+        
+        if tools:
+            return llm.bind_tools(self.tools)
 
-    def create_message(self, content: str) -> AIMessage:
-        return self.MessageClass(content=content, agent_name=self.name, timestamp=datetime.now().isoformat())
+        return llm
+
+    def create_message(self, content: str, agent_name: str = None) -> AIMessage:
+        return self.MessageClass(content=content, agent_name=agent_name if agent_name is not None else self.name, timestamp=datetime.now().isoformat())
 
     def _create_graph(self) -> StateGraph:
         raise NotImplementedError("Subclasses must implement this method")
