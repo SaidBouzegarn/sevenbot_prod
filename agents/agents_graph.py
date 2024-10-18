@@ -69,7 +69,7 @@ class Level1Agent(BaseAgent):
                 "is_first_execution": (bool, ...),
                 f"{self.name}_assistant_conversation": (Annotated[List[Union[AIMessage, BaseMessage]], add_messages], ...),
                 f"{self.name}_domain_knowledge": (Any, ...),
-                f"{self.name}_mode": (Literal["research", "converse"], ...),
+                f"{self.name}_mode": (Literal["research", "converse"], Field(default="research")),
                 f"{self.name}_messages": (Annotated[List[Union[AIMessage, BaseMessage]], add_messages], ...),
             },
             __base__=BaseModel
@@ -238,7 +238,7 @@ class Level2Agent(BaseAgent):
                 "level2_3_conversation": (Annotated[List[Union[AIMessage, BaseMessage]], add_messages], ...),
                 "is_first_execution": (bool, ...),
                 f"{self.name}_messages": (Annotated[List[Union[AIMessage, BaseMessage]], add_messages], ...),
-                f"{self.name}_mode": (Literal["CEO", "EXECUTIVES"], ...),
+                f"{self.name}_mode": (Literal["CEO", "EXECUTIVES"], Field(default="EXECUTIVES")),
             },
             __base__=BaseModel
         )
@@ -327,7 +327,7 @@ class Level3State(BaseModel):
     action: List[str]
     ceo_messages: Annotated[List[Union[AIMessage, BaseMessage]], add_messages]
     ceo_assistant_conversation: Annotated[List[Union[AIMessage, BaseMessage]], add_messages]
-    ceo_mode: Literal["analyze", "communicate", 'end']
+    ceo_mode: Literal["analyze", "communicate", 'end'] = "analyze"
     level2_agents: List[str]
     level1_agents: List[str]
     is_first_execution: bool = True
@@ -472,7 +472,7 @@ if __name__ == "__main__":
 
     level2_subordinates = {
         "supervisor1": ["agent1", "agent2"],
-        "supervisor2": ["agent3"],
+        "supervisor2": ["agent3", "agent4"],
     }
 
     # Function to get agent names from folder structure
@@ -533,60 +533,115 @@ if __name__ == "__main__":
         )
         level1_agents.append(level1_agent)
 
+    # Create subgraphs for Level 2 agents and their subordinates
+    level2_subgraphs = {}
+    for l2_agent in level2_agents:
+        subgraph = StateGraph(l2_agent.state_schema)
+        # Add Level 2 agent node
+        subgraph.add_node(l2_agent.name, l2_agent.graph)
+        
+        
+        subordinates = [l1_agent.name for l1_agent in level1_agents if l1_agent.name in l2_agent.subordinates]
+        # Add Level 1 subordinate nodes
+        for l1_agent in level1_agents:
+            if l1_agent.name in l2_agent.subordinates:
+                subgraph.add_node(l1_agent.name, l1_agent.graph)
+        
+        # Set entry point to Level 2 agent
+        subgraph.set_entry_point(l2_agent.name)
+        
+        # Add router node
+        router_name = f"{l2_agent.name}_router"
+        
+        def level2_router(state):
+            # This function will be called when the router node is executed
+            # It should return the names of all subordinates to execute them in parallel
+            return state
+
+        subgraph.add_node(router_name, level2_router)
+        
+        def supervisor_router(state: l2_agent.state_schema):
+            if getattr(state, f"{l2_agent.name}_mode") == "CEO":
+                return "CEO"
+            elif getattr(state, f"{l2_agent.name}_mode") == "EXECUTIVES":
+                return router_name
+            else:
+                return END
+
+        # Add conditional edges from Level 2 agent
+        subgraph.add_conditional_edges(
+            l2_agent.name,
+            supervisor_router,
+            {
+                "CEO": END,
+                router_name: router_name,
+                END: END
+            }
+        )
+        
+        # Add edges from router to subordinates
+        for subordinate in subordinates:
+            subgraph.add_edge(router_name, subordinate)
+        
+        # Add edges from subordinates back to Level 2 agent
+        for subordinate in subordinates:
+            subgraph.add_edge(subordinate, l2_agent.name)
+        
+        # Compile the subgraph
+        level2_subgraphs[l2_agent.name] = subgraph.compile()
+        mermaid_png = level2_subgraphs[l2_agent.name].get_graph().draw_mermaid_png()
+        img = Image.open(io.BytesIO(mermaid_png))
+        img.save(f'level2_agent_{l2_agent.name}_graph.png')
+
+
     # Create main graph using Level3State
     main_graph = StateGraph(Level3State)
 
     # Add CEO (Level 3) node
     main_graph.add_node("CEO", ceo_agent.graph)
 
-    # Add Level 1 agents to main graph
-    for l1_agent in level1_agents:
-            main_graph.add_node(l1_agent.name, l1_agent.graph)
-            
-    # Add Level 2 agents to main graph
-    for l2_agent in level2_agents:
-        main_graph.add_node(l2_agent.name, l2_agent.graph)
+ 
+   # Add ceo router node
+    ceo_router_name = "ceo_router"
         
+    def ceo_router_node(state):
+        # This function will be called when the router node is executed
+        # It should return the names of all subordinates to execute them in parallel
+        return state
 
-    #add conditional edge to route the end state of level 3 agent to all the level 2 agents if ceo_mode is communicate_with_directors or communicate_with_executives and route to end if ceo_mode is end
+    main_graph.add_node(ceo_router_name, ceo_router_node)
+    
+#add created subgraphs as nodes in the main graph
+    for l2_agent in level2_agents:
+        main_graph.add_node(l2_agent.name, level2_subgraphs[l2_agent.name]) 
+
+    def ceo_router(state: Level3State):
+        if getattr(state, f"ceo_mode") == "communicate_with_directors":
+            return ceo_router_name
+        elif getattr(state, f"ceo_mode") == "communicate_with_executives":
+            return ceo_router_name
+        else:
+            return END
+
+    # Add conditional edges from CEO to Level 2 subgraphs
     main_graph.add_conditional_edges(
         "CEO",
-        lambda s: "communicate" if s.ceo_mode in ["communicate_with_directors", "communicate_with_executives"] else END,
+        ceo_router,
         {
-            "communicate": [l2.name for l2 in level2_agents],
+            ceo_router_name : ceo_router_name,
             END: END
         }
     )
-
-    # Add conditional edges to route the END states of level 2 agents and edges to connect with level 1 agents when they reach END state
-
     for l2_agent in level2_agents:
-        main_graph.add_conditional_edges(
-            l2_agent.name,
-            lambda s, l2_name=l2_agent.name: getattr(s, f"{l2_name}_mode"),
-            {
-                "CEO": "CEO",
-                "EXECUTIVES": [l1.name for l1 in level1_agents if l1.name in l2_agent.subordinates],
-                END: END  # Add this line to handle the END case
-            }
-        )
+        main_graph.add_edge(ceo_router_name, l2_agent.name)
+        main_graph.add_edge(l2_agent.name, ceo_router_name)
 
-    # Modify the conditional edges for Level 1 agents
-    for l1_agent in level1_agents:
-        for l2_agent in level2_agents:
-            if l1_agent.name in l2_agent.subordinates:
-                main_graph.add_conditional_edges(
-                    l1_agent.name,
-                    lambda s, l1_name=l1_agent.name: l2_agent.name if getattr(s, f"{l1_name}_mode") == "converse" else END,
-                    {
-                        l2_agent.name: l2_agent.name,
-                        END: END  # Add this line to handle the END case
-                    }
-                )
 
     # Set the entry point
     main_graph.set_entry_point("CEO")
 
+ 
+            
     # Compile the main graph
     final_graph = main_graph.compile()
 
