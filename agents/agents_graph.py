@@ -532,99 +532,44 @@ if __name__ == "__main__":
     # Add CEO (Level 3) node
     main_graph.add_node("CEO", ceo_agent.graph)
 
-# Add Level 1 agents to main graph
-for l1_agent in level1_agents:
-        main_graph.add_node(l1_agent.name, l1_agent.graph)
-        
-# Add Level 2 agents to main graph
-for l2_agent in level2_agents:
-    main_graph.add_node(l2_agent.name, l2_agent.graph)
-    
-
-# Add conditional edges to route the END states of level 2 agents and edges to connect with level 1 agents when they reach END state
-
-for l2_agent in level2_agents:
-    # Add conditional edges to route the END states
-    main_graph.add_conditional_edges(
-        l2_agent.name,
-        lambda s: getattr(s, f"{l2_agent.name}_mode"),
-        {
-            "CEO": "CEO",
-            "EXECUTIVES": [l1.name for l1 in level1_agents if l1.name in l2_agent.subordinates],
-        }
-    )
-    # Add edges to subordinate Level 1 agents
+    # Add Level 1 agents to main graph
     for l1_agent in level1_agents:
-        if l1_agent.name in l2_agent.subordinates:
-            main_graph.add_conditional_edges(
-                f"{l2_agent.name}_supervisor",
-                lambda s, l1_name=l1_agent.name: l1_name if getattr(s, f"{l2_agent.name}_mode") == "EXECUTIVES" else None,
-                {
-                    l1_agent.name: l1_agent.name
-                }
-            )
+            main_graph.add_node(l1_agent.name, l1_agent.graph)
+            
+    # Add Level 2 agents to main graph
+    for l2_agent in level2_agents:
+        main_graph.add_node(l2_agent.name, l2_agent.graph)
+        
 
-
-
-
-     # Connect CEO to Level 2 agents
-    for l2_agent in level2_agents:                 
-        main_graph.add_conditional_edges(           
-            "CEO",
-            lambda s: l2_agent.name if s.ceo_mode == "communicate_with_directors" else None,
-            {l2_agent.name: l2_agent.name}
-        )
-
-        # Connect Level 2 agent back to CEO or to its subordinate Level 1 agents
-        main_graph.add_conditional_edges(
-            l2_agent.name,
-            lambda s: "CEO" if getattr(s, f"{l2_agent.name}_mode") == "CEO" else 
-                      [l1.name for l1 in level1_agents if l1.name in l2_agent.subordinates] if getattr(s, f"{l2_agent.name}_mode") == "EXECUTIVES" else 
-                      None,
-            {
-                "CEO": "CEO",
-                **{l1.name: l1.name for l1 in level1_agents if l1.name in l2_agent.subordinates}
-            }
-        )
-
-    # Modify the CEO node to include the 'end' condition
+    #add conditional edge to route the end state of level 3 agent to all the level 2 agents if ceo_mode is communicate_with_directors or communicate_with_executives and route to end if ceo_mode is end
     main_graph.add_conditional_edges(
         "CEO",
-        lambda s: "assistant" if s.ceo_mode == "analyze" else
-                  [l2.name for l2 in level2_agents] if s.ceo_mode == "communicate_with_directors" else
-                  END if s.ceo_mode == "end" else None,
-        {
-            "assistant": "assistant",
-            **{l2.name: l2.name for l2 in level2_agents},
-            END: END
-        }
+        lambda s: [l2.name for l2 in level2_agents] if s.ceo_mode == "communicate_with_directors" or s.ceo_mode == "communicate_with_executives" else END,
+        {l2.name: l2.name for l2 in level2_agents}
     )
 
-    # Add Level 1 agents and connect them to their respective Level 2 supervisors
-    for l1_agent in level1_agents:
-        main_graph.add_node(l1_agent.name, l1_agent.graph)
-        
-        # Find the corresponding Level 2 supervisor
-        l2_supervisor = next((l2 for l2 in level2_agents if l1_agent.name in l2.subordinates), None)
-        
-        if l2_supervisor:
-            # Connect Level 2 router to Level 1 agent
-            main_graph.add_edge(f"{l2_supervisor.name}_Router", l1_agent.name)
-            
-            # Connect Level 1 agent back to Level 2 supervisor when finished
-            main_graph.add_conditional_edges(
-                l1_agent.name,
-                lambda s: l2_supervisor.name if getattr(s, f"{l1_agent.name}_mode") != "research" else None,
-                {l2_supervisor.name: l2_supervisor.name}
-            )
+    # Add conditional edges to route the END states of level 2 agents and edges to connect with level 1 agents when they reach END state
 
-    # Connect CEO directly to Level 1 agents for executive communication
-    for l1_agent in level1_agents:
+    for l2_agent in level2_agents:
+        # Add conditional edges to route the END states
         main_graph.add_conditional_edges(
-            "CEO",
-            lambda s: l1_agent.name if s.ceo_mode == "communicate_with_executives" else None,
-            {l1_agent.name: l1_agent.name}
+            l2_agent.name,
+            lambda s: getattr(s, f"{l2_agent.name}_mode"),
+            {
+                "CEO": "CEO",
+                "EXECUTIVES": [l1.name for l1 in level1_agents if l1.name in l2_agent.subordinates],
+            }
         )
+        # Add edges to subordinate Level 1 agents
+        for l1_agent in level1_agents:
+            if l1_agent.name in l2_agent.subordinates:
+                main_graph.add_conditional_edges(
+                    l1_agent.name,
+                    lambda s: l2_agent.name if getattr(s, f"{l1_agent.name}_mode") == "converse" else END,
+                    {
+                        l2_agent.name: l2_agent.name
+                    }
+                )
 
     # Set the entry point
     main_graph.set_entry_point("CEO")
