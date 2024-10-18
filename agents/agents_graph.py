@@ -23,6 +23,7 @@ from agent_base import BaseAgent
 from langchain_core.messages import trim_messages
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import START, MessagesState, StateGraph
+from datetime import datetime
 
 set_llm_cache(InMemoryCache())
 
@@ -210,6 +211,7 @@ class Level1Agent(BaseAgent):
 
 
     
+
 
 
 class Level2Decision(BaseModel):
@@ -430,7 +432,7 @@ class Level3Agent(BaseAgent):
             "ceo",
             should_continue,
             {
-                "assistant": "assistant",
+                "assistant": "ceo_assistant",
                 "ceo": "ceo",
                 "directors": END,  # We'll handle this in the main graph
                 "executives": END,  # We'll handle this in the main graph
@@ -466,6 +468,11 @@ if __name__ == "__main__":
         "model": "gpt-4",
         "temperature": 0.5,
         "max_tokens": 1000
+    }
+
+    level2_subordinates = {
+        "supervisor1": ["agent1", "agent2"],
+        "supervisor2": ["agent3"],
     }
 
     # Function to get agent names from folder structure
@@ -504,7 +511,7 @@ if __name__ == "__main__":
             checkpointer=checkpointer,
             memory_store=memory_store,
             debug=debug,
-            subordinates=get_agent_names(1)  # Pass the names of Level 1 agents
+            subordinates=level2_subordinates.get(name, [])  # Assign subordinates based on the dictionary
         )
         level2_agents.append(level2_agent)
 
@@ -544,30 +551,36 @@ if __name__ == "__main__":
     #add conditional edge to route the end state of level 3 agent to all the level 2 agents if ceo_mode is communicate_with_directors or communicate_with_executives and route to end if ceo_mode is end
     main_graph.add_conditional_edges(
         "CEO",
-        lambda s: [l2.name for l2 in level2_agents] if s.ceo_mode == "communicate_with_directors" or s.ceo_mode == "communicate_with_executives" else END,
-        {l2.name: l2.name for l2 in level2_agents}
+        lambda s: "communicate" if s.ceo_mode in ["communicate_with_directors", "communicate_with_executives"] else END,
+        {
+            "communicate": [l2.name for l2 in level2_agents],
+            END: END
+        }
     )
 
     # Add conditional edges to route the END states of level 2 agents and edges to connect with level 1 agents when they reach END state
 
     for l2_agent in level2_agents:
-        # Add conditional edges to route the END states
         main_graph.add_conditional_edges(
             l2_agent.name,
-            lambda s: getattr(s, f"{l2_agent.name}_mode"),
+            lambda s, l2_name=l2_agent.name: getattr(s, f"{l2_name}_mode"),
             {
                 "CEO": "CEO",
                 "EXECUTIVES": [l1.name for l1 in level1_agents if l1.name in l2_agent.subordinates],
+                END: END  # Add this line to handle the END case
             }
         )
-        # Add edges to subordinate Level 1 agents
-        for l1_agent in level1_agents:
+
+    # Modify the conditional edges for Level 1 agents
+    for l1_agent in level1_agents:
+        for l2_agent in level2_agents:
             if l1_agent.name in l2_agent.subordinates:
                 main_graph.add_conditional_edges(
                     l1_agent.name,
-                    lambda s: l2_agent.name if getattr(s, f"{l1_agent.name}_mode") == "converse" else END,
+                    lambda s, l1_name=l1_agent.name: l2_agent.name if getattr(s, f"{l1_name}_mode") == "converse" else END,
                     {
-                        l2_agent.name: l2_agent.name
+                        l2_agent.name: l2_agent.name,
+                        END: END  # Add this line to handle the END case
                     }
                 )
 
