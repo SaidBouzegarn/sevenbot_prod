@@ -644,6 +644,9 @@ if __name__ == "__main__":
             
     # Compile the main graph
     final_graph = main_graph.compile()
+    mermaid_png = final_graph.get_graph().draw_mermaid_png()
+    img = Image.open(io.BytesIO(mermaid_png))
+    img.save(f'level3_agent_graph.png')
 
     # Now you can use final_graph for execution or further processing
     # For example:
