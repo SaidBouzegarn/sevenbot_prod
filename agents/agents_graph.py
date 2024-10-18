@@ -24,7 +24,10 @@ from langchain_core.messages import trim_messages
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import START, MessagesState, StateGraph
 from datetime import datetime
-
+from dotenv import load_dotenv
+import os
+from langchain_community.tools import DuckDuckGoSearchRun
+from langchain_openai import ChatOpenAI
 set_llm_cache(InMemoryCache())
 
 
@@ -443,13 +446,7 @@ class Level3Agent(BaseAgent):
 
         return workflow.compile()
 
-
-if __name__ == "__main__":
-    from dotenv import load_dotenv
-    import os
-    from langchain_community.tools import DuckDuckGoSearchRun
-    from langchain_openai import ChatOpenAI
-
+def create_agents_graph():
     load_dotenv()
 
     # Common configuration
@@ -589,9 +586,9 @@ if __name__ == "__main__":
         
         # Compile the subgraph
         level2_subgraphs[l2_agent.name] = subgraph.compile()
-        mermaid_png = level2_subgraphs[l2_agent.name].get_graph().draw_mermaid_png()
-        img = Image.open(io.BytesIO(mermaid_png))
-        img.save(f'level2_agent_{l2_agent.name}_graph.png')
+        #mermaid_png = level2_subgraphs[l2_agent.name].get_graph().draw_mermaid_png()
+        #img = Image.open(io.BytesIO(mermaid_png))
+        #img.save(f'level2_agent_{l2_agent.name}_graph.png')
 
 
     # Create main graph using Level3State
@@ -634,7 +631,7 @@ if __name__ == "__main__":
     )
     for l2_agent in level2_agents:
         main_graph.add_edge(ceo_router_name, l2_agent.name)
-        main_graph.add_edge(l2_agent.name, ceo_router_name)
+        main_graph.add_edge(l2_agent.name, "CEO")
 
 
     # Set the entry point
@@ -644,10 +641,14 @@ if __name__ == "__main__":
             
     # Compile the main graph
     final_graph = main_graph.compile()
-    mermaid_png = final_graph.get_graph().draw_mermaid_png()
-    img = Image.open(io.BytesIO(mermaid_png))
-    img.save(f'level3_agent_graph.png')
+    #mermaid_png = final_graph.get_graph().draw_mermaid_png()
+    # img = Image.open(io.BytesIO(mermaid_png))
+    #img.save(f'level3_agent_graph.png')
+    return final_graph
 
+if __name__ == "__main__":
+
+    final_graph = create_agents_graph()
     # Now you can use final_graph for execution or further processing
     # For example:
     # initial_state = Level3State(
