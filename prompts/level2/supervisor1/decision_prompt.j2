@@ -12,20 +12,20 @@ Current State:
 
 Based on this information, you need to make a decision:
 
-1. If you need more information from your subordinates, choose "converse_with_subordinates".
-2. If the situation requires immediate attention from the CEO, choose "converse_with_ceo".
+1. If you need to aggregate information for the CEO, choose "aggregate_for_ceo".
+2. If you need to break down tasks for your executives, choose "break_down_for_executives".
 
 Provide your decision, detailed reasoning for your choice, and the content of your message.
 
 Remember:
-- If subordinates haven't answered yet, break down the question or topic into specific tasks or areas to explore.
-- Specify which subordinates must respond.
+- If aggregating for the CEO, summarize the key points and insights from your subordinates' responses.
+- If breaking down for executives, specify tasks or areas of focus for each relevant subordinate.
 - Consider the potential impact on the company when formulating your message.
 - Think about the urgency and importance of the information at hand.
 
 Your response should be structured as follows:
 {
-    "reasoning": "Your reasoning for the decision here",
-    "decision": "converse_with_subordinates" or "converse_with_ceo",
-    "content": "If converse_with_subordinates: List of questions with names of subordinates who must reply because it concerns them directly. If converse_with_ceo: Message aggregating the answers from subordinates.",
+    "reasoning": "Your detailed explanation for the decision, including your assessment of the current information and any identified knowledge gaps",
+    "decision": "aggregate_for_ceo" or "break_down_for_executives",
+    "content": "If aggregate_for_ceo: A concise summary of key information and insights for the CEO. If break_down_for_executives: List of specific tasks or areas of focus for relevant subordinates."
 }

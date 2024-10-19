@@ -5,7 +5,6 @@ from llama_index.core import VectorStoreIndex, StorageContext, ServiceContext, S
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.llms.openai import OpenAI
-from llama_index.llms.llama import LLaMA
 from llama_index.llms.mistralai import MistralAI
 import chromadb
 from chromadb.utils import embedding_functions
@@ -36,71 +35,70 @@ index = VectorStoreIndex.from_vector_store(vector_store, storage_context=storage
 query_engine = index.as_query_engine()
 
 # Streamlit app
-st.title("Chat with LLaMA")
+st.set_page_config(page_title="7bot", layout="wide")
 
-# Model selection
-model_options = ["gpt-3.5-turbo", "gpt-4", "llama", "mistralai"]
-selected_model = st.selectbox("Select model:", model_options)
+# Sidebar navigation
+st.sidebar.title("Navigation")
+page = st.sidebar.radio("Go to", ["Home", "Start", "View Graph DB"])
 
-# Set up LLM based on selected model
-if selected_model in ["gpt-3.5-turbo", "gpt-4"]:
-    llm = OpenAI(model=selected_model)
-elif selected_model == "llama":
-    llm = LLaMA()
-elif selected_model == "mistralai":
-    llm = MistralAI()
-else:
-    st.error("Selected model is not supported.")
-    st.stop()
+# Home page
+if page == "Home":
+    st.markdown("<h1 style='text-align: center; font-size: 72px;'>7bot</h1>", unsafe_allow_html=True)
 
-Settings.llm = llm
+# Start page
+elif page == "Start":
+    st.title("Start")
+    upload_option = st.radio("Choose upload method:", ["Upload S3 Links", "Upload URLs"])
+    
+    if upload_option == "Upload URLs":
+        # Call scrape function
+        scraped_data = scrape()  # Assume scrape() is defined elsewhere and returns JSON-like data
+        st.write("Scraped Data:", scraped_data)
+    
+    if st.button("Populate Vector DB"):
+        # Call function to add data to vector DB
+        populate_vector_db(scraped_data)  # Assume populate_vector_db() is defined elsewhere
+    
+    if st.button("Populate Graph"):
+        # Call function to add data to graph DB
+        populate_graph_db(scraped_data)  # Assume populate_graph_db() is defined elsewhere
 
-# Initialize chat history
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+# View Graph DB page
+elif page == "View Graph DB":
+    st.title("Graph DB Viewer")
+    # Display and interact with the graph DB
+    # Assume view_graph_db() is defined elsewhere
+    view_graph_db()
 
-# Display chat messages from history on app rerun
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+    # Chatbot interface
+    st.sidebar.title("Chat with LLaMA")
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
 
-# React to user input
-if prompt := st.chat_input("What would you like to know?"):
-    # Display user message in chat message container
-    st.chat_message("user").markdown(prompt)
-    # Add user message to chat history
-    st.session_state.messages.append({"role": "user", "content": prompt})
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
-    try:
-        # Query the index for relevant documents
-        retrieval_results = query_engine.retrieve(prompt)
+    if prompt := st.chat_input("What would you like to know?"):
+        st.chat_message("user").markdown(prompt)
+        st.session_state.messages.append({"role": "user", "content": prompt})
+
+        try:
+            retrieval_results = query_engine.retrieve(prompt)
+            context = ""
+            if retrieval_results:
+                context = "Based on the following information:\n\n"
+                for i, result in enumerate(retrieval_results[:3], 1):
+                    context += f"{i}. {result.node.get_content()}\n\n"
+            
+            llm_prompt = f"{context}Human: {prompt}\n\nAssistant: Let me answer your question based on the information provided and my general knowledge."
+            llm_response = llm.complete(llm_prompt)
+            
+            with st.chat_message("assistant"):
+                st.markdown(llm_response.text)
+            
+            st.session_state.messages.append({"role": "assistant", "content": llm_response.text})
         
-        # Prepare context from retrieved documents
-        context = ""
-        if retrieval_results:
-            context = "Based on the following information:\n\n"
-            for i, result in enumerate(retrieval_results[:3], 1):
-                context += f"{i}. {result.node.get_content()}\n\n"
-        
-        # Prepare the prompt for the LLM
-        llm_prompt = f"{context}Human: {prompt}\n\nAssistant: Let me answer your question based on the information provided and my general knowledge."
-        
-        # Generate response using the LLM
-        llm_response = llm.complete(llm_prompt)
-        
-        # Display assistant response in chat message container
-        with st.chat_message("assistant"):
-            st.markdown(llm_response.text)
-        
-        # Add assistant response to chat history
-        st.session_state.messages.append({"role": "assistant", "content": llm_response.text})
-        
-        # Display debug information
-        st.sidebar.subheader("Debug Information")
-        st.sidebar.write("Retrieved Documents:")
-        for i, result in enumerate(retrieval_results[:3], 1):
-            st.sidebar.write(f"{i}. {result.node.get_content()[:100]}...")
-        
-    except Exception as e:
-        st.error(f"An error occurred while processing your query: {str(e)}")
-        st.exception(e)
+        except Exception as e:
+            st.error(f"An error occurred while processing your query: {str(e)}")
+            st.exception(e)

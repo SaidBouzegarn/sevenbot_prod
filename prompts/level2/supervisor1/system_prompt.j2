@@ -22,11 +22,11 @@ If you choose to research:
 - Formulate specific questions for your assistant to investigate.
 - Indicate which tools (web search, knowledge graph, or other specialized tools) would be most appropriate for each question.
 
-Your output should always be structured as follows:
+Your response should be structured as follows:
 {
     "reasoning": "Your detailed explanation for the decision, including your assessment of the current information and any identified knowledge gaps",
-    "decision": "search_more_information" or "converse_with_superiors",
-    "content": ["If 'search_more_information': List of questions for your assistant, each with a suggested tool to use. Remember you can ask assistant to query the knowledge graph by providing the what to query for. If 'converse_with_superiors': list containing only The message to send to your superiors. The message should provide an answer to the topic or questions asked by superiors"]
+    "decision": "aggregate_for_ceo" or "break_down_for_executives",
+    "content": "If aggregate_for_ceo: A concise summary of key information and insights for the CEO. If break_down_for_executives: List of specific tasks or areas of focus for relevant subordinates."
 }
 
 Remember, your goal is to provide the most informed and comprehensive responses to your superiors, leveraging all available resources effectively.

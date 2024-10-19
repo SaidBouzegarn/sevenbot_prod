@@ -28,8 +28,21 @@ from dotenv import load_dotenv
 import os
 from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_openai import ChatOpenAI
+import json
+import logging
+
+# Set the logging level for the SageMaker SDK to WARNING or higher
+logging.getLogger('sagemaker').setLevel(logging.WARNING)
+
+
 set_llm_cache(InMemoryCache())
 
+def pydantic_to_json(pydantic_obj):
+    # Convert to dictionary and then to a compact JSON string
+    obj_dict = pydantic_obj.dict()
+    # Use separators to minimize whitespace: (',', ':') removes spaces after commas and colons
+    compact_string = json.dumps(obj_dict, separators=(',', ':'))
+    return compact_string
 
 ##########################################################################################
 #################################### Level 1 agent #######################################
@@ -39,7 +52,7 @@ set_llm_cache(InMemoryCache())
 class Level1Decision(BaseModel):
     reasoning: str
     decision: Literal["search_more_information", "converse_with_superiors"]
-    content: List[str] = Field(min_items=1, max_items=1)
+    content: List[str] = Field(min_items=1, max_items=5)
 
 
 
@@ -61,19 +74,20 @@ class Level1Agent(BaseAgent):
         # Generate the system prompt once during initialization
         system_prompt_template = self.jinja_env.get_template('system_prompt.j2')
         self.system_prompt = system_prompt_template.render(tools=self.tools)
+        self.system_message = SystemMessage(content=self.system_prompt)
         self.graph = self._create_graph()
 
     def _create_dynamic_state_schema(self):
         return create_model(
             f'{self.name}_Level1State',
             **{
-                "level1_2_conversation": (Annotated[List[Union[AIMessage, BaseMessage]], add_messages], ...),
-                "level1_3_conversation": (Annotated[List[Union[AIMessage, BaseMessage]], add_messages], ...),
-                "is_first_execution": (bool, ...),
-                f"{self.name}_assistant_conversation": (Annotated[List[Union[AIMessage, BaseMessage]], add_messages], ...),
+                "level1_2_conversation": (Annotated[List, add_messages], ...),
+                "level1_3_conversation": (Annotated[List, add_messages], ...),
+                f"{self.name}_is_first_execution": (bool, Field(default=True)),
+                f"{self.name}_assistant_conversation": (Annotated[List, add_messages], ...),
                 f"{self.name}_domain_knowledge": (Any, ...),
                 f"{self.name}_mode": (Literal["research", "converse"], Field(default="research")),
-                f"{self.name}_messages": (Annotated[List[Union[AIMessage, BaseMessage]], add_messages], ...),
+                f"{self.name}_messages": (Annotated[List, add_messages], ...),
             },
             __base__=BaseModel
         )
@@ -84,6 +98,7 @@ class Level1Agent(BaseAgent):
             "domain_knowledge": f"{self.name}_domain_knowledge",
             "mode": f"{self.name}_mode",
             "messages": f"{self.name}_messages",
+            "is_first_execution": f"{self.name}_is_first_execution",
         }
 
     def get_attr(self, state, attr_name):
@@ -96,6 +111,9 @@ class Level1Agent(BaseAgent):
         
         def level1_node(state: self.state_schema) -> Dict[str, Any]:
             
+            if not self.get_attr(state, "messages"):
+                self.get_attr(state, "messages").append(self.system_message)
+                
             #we want to get the last message from the level 3 conversation or level2 conversation based on the one that has last msg
             time1 = datetime.fromisoformat(self.get_attr(state, "level1_2_conversation")[-1].timestamp)
             time2 = datetime.fromisoformat(self.get_attr(state, "level1_3_conversation")[-1].timestamp)
@@ -120,29 +138,32 @@ class Level1Agent(BaseAgent):
 
             # Use the decision prompt
             message = HumanMessage(content=decision_prompt)
-
             self.get_attr(state, "messages").append(message)
             structured_llm = self.llm.with_structured_output(Level1Decision)
-            response = structured_llm.invoke(self.get_attr(state, "messages"))
-            self.get_attr(state, "messages").append(response)
+            response = structured_llm.invoke(message)
 
             if self.debug:
                 print(f"Reasoning: {response.reasoning}")
                 print(f"Decision: {response.decision}")
                 print(f"Content: {response.content}")
-                
+
+            response.content = " ".join(response.content)
             if response.decision == "search_more_information":
                 questions = response.content
                 message = self.create_message(questions)
                 self.get_attr(state, "assistant_conversation").extend([message])
                 state.mode = "research"
             elif response.decision == "converse_with_superiors":
-                message = self.create_message(response.content[0] if response.content else "")
+                message = self.create_message(response.content)
                 if time1 > time2:
                     self.get_attr(state, "level1_2_conversation").append(message)
                 else:
                     self.get_attr(state, "level1_3_conversation").append(message)
                 state.mode = "converse_with_superiors"
+            
+            response = self.create_message(response)
+            self.get_attr(state, "messages").append(response)
+
             return state
 
         def assistant_node(state: self.state_schema) -> Dict[str, Any]:
@@ -220,7 +241,7 @@ class Level1Agent(BaseAgent):
 class Level2Decision(BaseModel):
     reasoning: str
     decision: Literal["aggregate_for_ceo", "break_down_for_executives"]
-    content: str
+    content: List[str] = Field(min_items=1, max_items=1)
 
 class Level2Agent(BaseAgent):
     def __init__(self, *args, **kwargs):
@@ -231,17 +252,20 @@ class Level2Agent(BaseAgent):
         self.subordinates = kwargs.get('subordinates', [])
         system_prompt_template = self.jinja_env.get_template('system_prompt.j2')
         self.system_prompt = system_prompt_template.render(tools=self.tools)
+        self.system_message = SystemMessage(content=self.system_prompt)
+        self.attr_mapping = self._create_attr_mapping()
+
         self.graph = self._create_graph()
 
     def _create_dynamic_state_schema(self):
         return create_model(
             f'{self.name}_Level2State',
             **{
-                "level1_2_conversation": (Annotated[List[Union[AIMessage, BaseMessage]], add_messages], ...),
-                "level2_3_conversation": (Annotated[List[Union[AIMessage, BaseMessage]], add_messages], ...),
-                "is_first_execution": (bool, ...),
-                f"{self.name}_messages": (Annotated[List[Union[AIMessage, BaseMessage]], add_messages], ...),
-                f"{self.name}_mode": (Literal["CEO", "EXECUTIVES"], Field(default="EXECUTIVES")),
+                "level1_2_conversation": (Annotated[List, add_messages], ...),
+                "level2_3_conversation": (Annotated[List, add_messages], ...),
+                f"{self.name}_is_first_execution": (bool, Field(default=True)),
+                f"{self.name}_messages": (Annotated[List, add_messages], ...),
+                f"{self.name}_mode": (Literal["aggregate_for_ceo", "break_down_for_executives"], Field(default="break_down_for_executives")),
             },
             __base__=BaseModel
         )
@@ -249,6 +273,7 @@ class Level2Agent(BaseAgent):
         return {
             "mode": f"{self.name}_mode",
             "messages": f"{self.name}_messages",
+            "is_first_execution": f"{self.name}_is_first_execution",
         }
 
     def get_attr(self, state, attr_name):
@@ -258,6 +283,15 @@ class Level2Agent(BaseAgent):
         setattr(state, self.attr_mapping.get(attr_name, attr_name), value)
 
 
+    def supervisor_router(self, state):
+        router_name = f"{self.name}_router"
+
+        if getattr(state, f"{self.name}_mode") == "aggregate_for_ceo":
+            return "CEO"
+        elif getattr(state, f"{self.name}_mode") == "break_down_for_executives":
+            return router_name
+        else:
+            return END
 
     def _create_graph(self) -> StateGraph:
         def level2_supervisor_node(state: self.state_schema) -> Dict[str, Any]:
@@ -276,30 +310,34 @@ class Level2Agent(BaseAgent):
             )
             
             structured_llm = self.llm.with_structured_output(Level2Decision)
-            response = structured_llm.invoke([self.system_prompt, HumanMessage(content=decision_prompt)])
-            self.get_attr(state, "messages").append(response)
+            response = structured_llm.invoke([self.system_message, HumanMessage(content=decision_prompt)])
+
 
             if self.debug:
                 print(f"Reasoning: {response.reasoning}")
                 print(f"Decision: {response.decision}")
                 print(f"Content: {response.content}")
 
-            message = self.create_message(response.content)
+            response.content = " ".join(response.content)
+            message = self.create_message(content=response.content)
             if response.decision == "aggregate_for_ceo":
                 state.level2_3_conversation.append(message)
-                setattr(state, f"{self.name}_mode", "CEO")
+                setattr(state, f"{self.name}_mode", "aggregate_for_ceo")
             elif response.decision == "break_down_for_executives":
                 state.level1_2_conversation.append(message)
-                setattr(state, f"{self.name}_mode", "EXECUTIVES")
+                setattr(state, f"{self.name}_mode", "break_down_for_executives")
             
+            response = self.create_message(pydantic_to_json(response))
+            self.get_attr(state, "messages").append(response)
             return state
 
-        def should_continue(state: self.state_schema) -> Literal["CEO", "EXECUTIVES", END]:
-            if getattr(state, f"{self.name}_mode") == "CEO":
-                return "CEO"
-            elif getattr(state, f"{self.name}_mode") == "EXECUTIVES":
-                return "EXECUTIVES"
-
+        def should_continue(state: self.state_schema) -> Literal["aggregate_for_ceo", "break_down_for_executives", END]:
+            if getattr(state, f"{self.name}_mode") == "aggregate_for_ceo":
+                return "aggregate_for_ceo"
+            elif getattr(state, f"{self.name}_mode") == "break_down_for_executives":
+                return "break_down_for_executives"
+            else:
+                return END
 
         workflow = StateGraph(self.state_schema)
         workflow.add_node(f"{self.name}_supervisor", level2_supervisor_node)
@@ -309,8 +347,8 @@ class Level2Agent(BaseAgent):
             f"{self.name}_supervisor",
             should_continue,
             {
-                "CEO": END,
-                "EXECUTIVES": END,
+                "aggregate_for_ceo": END,
+                "break_down_for_executives": END,
             }
         )
 
@@ -322,15 +360,15 @@ class Level2Agent(BaseAgent):
 ##########################################################################################
 
 class Level3State(BaseModel):
-    level2_3_conversation: Annotated[List[Union[AIMessage, BaseMessage]], add_messages]
-    level1_3_conversation: Annotated[List[Union[AIMessage, BaseMessage]], add_messages]
+    level2_3_conversation: Annotated[List, add_messages]
+    level1_3_conversation: Annotated[List, add_messages]
     company_knowledge: str
     news_insights: List[str]
     digest: List[str]
     action: List[str]
-    ceo_messages: Annotated[List[Union[AIMessage, BaseMessage]], add_messages]
-    ceo_assistant_conversation: Annotated[List[Union[AIMessage, BaseMessage]], add_messages]
-    ceo_mode: Literal["analyze", "communicate", 'end'] = "analyze"
+    ceo_messages: Annotated[List, add_messages]
+    ceo_assistant_conversation: Annotated[List, add_messages]
+    ceo_mode: Literal["research_information", "write_to_digest", "communicate_with_directors", "communicate_with_executives", "end"]
     level2_agents: List[str]
     level1_agents: List[str]
     is_first_execution: bool = True
@@ -338,7 +376,7 @@ class Level3State(BaseModel):
 class CEODecision(BaseModel):
     reasoning: str
     decision: Literal["write_to_digest", "research_information", "communicate_with_directors", "communicate_with_executives", 'end']
-    content: str
+    content: List[str]
 
 class Level3Agent(BaseAgent):
     def __init__(self, *args, **kwargs):
@@ -346,11 +384,10 @@ class Level3Agent(BaseAgent):
         self.state_schema = Level3State
         self.prompt_dir = os.path.join(os.path.dirname(__file__), '..', 'prompts/level3', self.name)
         self.jinja_env = Environment(loader=FileSystemLoader(self.prompt_dir))
-        
         # Generate the system prompt once during initialization
         system_prompt_template = self.jinja_env.get_template('system_prompt.j2')
-        self.system_prompt_content = system_prompt_template.render()
-        self.system_message = SystemMessage(content=self.system_prompt_content)
+        self.system_prompt = system_prompt_template.render()
+        self.system_message = SystemMessage(content=self.system_prompt)
         self.graph = self._create_graph()
 
     def _create_graph(self) -> StateGraph:
@@ -364,14 +401,17 @@ class Level3Agent(BaseAgent):
             )
             
             if state.is_first_execution:
-                state.ceo_messages.append(self.system_prompt)
+                state.ceo_messages.append(self.system_message)
                 state.is_first_execution = False
 
+            print('debug')
 
-            messages = [self.system_message, HumanMessage(content=decision_prompt)]
+            state.ceo_messages.append(HumanMessage(content=decision_prompt, type = "human", name = self.name))
             structured_llm = self.llm.with_structured_output(CEODecision)
-            response = structured_llm.invoke(messages)
-            state.ceo_messages.append(messages + [response])
+            response = structured_llm.invoke(state.ceo_messages)
+
+            # Convert the list of strings to a single string
+            response.content = " ".join(response.content)
 
             if self.debug:
                 print(f"Reasoning: {response.reasoning}")
@@ -380,34 +420,38 @@ class Level3Agent(BaseAgent):
             
             if response.decision == "write_to_digest":
                 state.digest.append(response.content)
-                state.ceo_mode = "process_digest"
+                state.ceo_mode = "write_to_digest"
             elif response.decision == "research_information":
-                state.ceo_assistant_conversation.append(HumanMessage(content=response.content))
-                state.ceo_mode = "process_research"
+                state.ceo_assistant_conversation.append(HumanMessage(content=response.content, type = "human"))
+                state.ceo_mode = "research_information"
             elif response.decision == "communicate_with_directors":
-                state.level2_3_conversation.append(self.create_message(response.content))
+                state.level2_3_conversation.append(self.create_message(response.content, type = "human"))
                 state.ceo_mode = "communicate_with_directors"
             elif response.decision == "communicate_with_executives":
-                state.level1_3_conversation.append(self.create_message(response.content))
+                state.level1_3_conversation.append(self.create_message(response.content, type = "human"))
                 state.ceo_mode = "communicate_with_executives"
             
             elif response.decision == "end":
                 state.ceo_mode = "end"
+            response = HumanMessage(content=pydantic_to_json(response), type = "human")
+
+            #response = self.create_message(pydantic_to_json(response))
+            state.ceo_messages.append(response)
+
             return state
 
         def assistant_node(state: self.state_schema) -> Dict[str, Any]:
             prompt = self.jinja_env.get_template('assistant_prompt.j2')
             last_message = state.ceo_assistant_conversation[-1]
             
-            if isinstance(last_message, HumanMessage):
-                response = self.assistant_llm.invoke(self.create_message(content=prompt.render(
-                    question=last_message.content,
-                    company_knowledge=state.company_knowledge,
-                    digest=state.digest
-                )))
-                
-                state.ceo_assistant_conversation.append(AIMessage(content=response))
+            response = self.assistant_llm.invoke(self.create_message(content=prompt.render(
+                question=last_message.content,
+                company_knowledge=state.company_knowledge,
+                digest=state.digest
+            )))
             
+            state.ceo_assistant_conversation.append(AIMessage(content=response))
+        
             return state
 
         def should_continue(state: Level3State) -> Literal["assistant", "ceo", "directors", "executives", END]:
@@ -459,7 +503,7 @@ def create_agents_graph():
     llm_config = {
         "model": "gpt-3.5-turbo",
         "temperature": 0.7,
-        "max_tokens": 500
+        "max_tokens": 1000
     }
     assistant_llm_config = {
         "model": "gpt-4",
@@ -557,18 +601,12 @@ def create_agents_graph():
 
         subgraph.add_node(router_name, level2_router)
         
-        def supervisor_router(state: l2_agent.state_schema):
-            if getattr(state, f"{l2_agent.name}_mode") == "CEO":
-                return "CEO"
-            elif getattr(state, f"{l2_agent.name}_mode") == "EXECUTIVES":
-                return router_name
-            else:
-                return END
+
 
         # Add conditional edges from Level 2 agent
         subgraph.add_conditional_edges(
             l2_agent.name,
-            supervisor_router,
+            l2_agent.supervisor_router,
             {
                 "CEO": END,
                 router_name: router_name,
@@ -649,23 +687,46 @@ def create_agents_graph():
 if __name__ == "__main__":
 
     final_graph = create_agents_graph()
-    # Now you can use final_graph for execution or further processing
-    # For example:
-    # initial_state = Level3State(
-    #     level2_3_conversation=[],
-    #     level1_3_conversation=[],
-    #     company_knowledge="Our company is a tech startup focusing on AI solutions.",
-    #     news_insights=[],
-    #     digest=[],
-    #     action=[],
-    #     ceo_messages=[],
-    #     ceo_assistant_conversation=[],
-    #     ceo_mode="analyze",
-    #     level2_agents=[agent.name for agent in level2_agents],
-    #     level1_agents=[agent.name for agent in level1_agents],
-    #     is_first_execution=True
-    # )
-    # result = final_graph.invoke(initial_state)
+    # Now let's invoke the graph with some fake entry state
+    initial_state = Level3State(
+        level2_3_conversation=[],
+        level1_3_conversation=[],
+        company_knowledge="Our company is a tech startup focusing on AI solutions.",
+        news_insights=["AI market is growing rapidly", "New regulations on data privacy"],
+        digest=[],
+        action=[],
+        ceo_messages=[HumanMessage(content="What's our strategy for the next quarter?", type = "human")],
+        ceo_assistant_conversation=[],
+        ceo_mode="research_information",
+        level2_agents=["Director1", "Director2"],
+        level1_agents=["Agent1", "Agent2", "Agent3", "Agent4"],
+    )
+    
+       # Helper function for formatting the stream nicely
+    def print_stream(stream):
+        for s in stream:
+            print(s)
+
+    # Invoke the graph with the initial state
+    config = {"configurable": {"thread_id": "test_thread2"}}
+
+    print_stream(final_graph.stream(initial_state, config, stream_mode="values"))
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    #result = final_graph.invoke(initial_state)
+
+    # Print the result
+    #print("Graph execution result:", result)
 
 
 

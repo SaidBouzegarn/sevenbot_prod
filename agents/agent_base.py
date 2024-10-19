@@ -34,14 +34,6 @@ COHERE_MODELS = ["command", "command-light", "command-nightly"]
 GROQ_MODELS = ["llama2-70b-4096", "mixtral-8x7b-32768"]
 VERTEXAI_MODELS = ["chat-bison", "chat-bison@001", "codechat-bison", "codechat-bison@001"]
 
-def create_agent_message_class(agent_name: str) -> Type[AIMessage]:
-    """Dynamically create a new message class for a specific agent."""
-    return type(f"{agent_name}Message", (AIMessage,), {
-        "__doc__": f"A message from the {agent_name} Agent.",
-        "agent_name": agent_name,
-        "timestamp": datetime.now().isoformat()
-
-    })
 
 class BaseAgent:
     def __init__(
@@ -61,7 +53,6 @@ class BaseAgent:
     ):
         self.name = name
         self.tools = tools or [DuckDuckGoSearchRun()]
-        self.MessageClass = create_agent_message_class(name)
         self.llm = self._construct_llm(llm, llm_params)
         self.assistant_llm = self._construct_llm(assistant_llm, assistant_llm_params, tools=True)
         self.system_message = system_message
@@ -91,8 +82,25 @@ class BaseAgent:
 
         return llm
 
-    def create_message(self, content: str, agent_name: str = None) -> AIMessage:
-        return self.MessageClass(content=content, agent_name=agent_name if agent_name is not None else self.name, timestamp=datetime.now().isoformat())
+    # Old version of create_message not working properly
+    def create_message_old_version(self, content, agent_name: str = None) -> AIMessage:
+        """Dynamically create a new message class for a specific agent."""
+        if agent_name is None:
+            agent_name = self.name
+        message = type(f"{agent_name}Message", (BaseMessage,), {
+            "content": content,
+            "__doc__": f"A message from the {agent_name} Agent.",
+            "agent_name": agent_name,
+            "timestamp": datetime.now().isoformat()
+        })
+        return message
+
+    def create_message(self, content: str, agent_name: str = None, type: Literal["human", "ai"] = "human") -> AIMessage:
+        """Dynamically create a new message class for a specific agent."""
+        if agent_name is None:
+            agent_name = self.name
+
+        return HumanMessage(content=content, type = type, name=f"{agent_name}", additional_kwargs={"agent_name": agent_name, "timestamp": datetime.now().isoformat()})
 
     def _create_graph(self) -> StateGraph:
         raise NotImplementedError("Subclasses must implement this method")
