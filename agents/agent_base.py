@@ -4,7 +4,7 @@ from langchain_core.tools import BaseTool
 from langchain_core.messages import BaseMessage, AIMessage, SystemMessage, HumanMessage
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
-from langchain_core.pydantic_v1 import BaseModel, Field
+from pydantic import BaseModel, Field
 from langchain.schema.runnable import Runnable
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver

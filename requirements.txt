@@ -2,9 +2,6 @@ boto3
 openai
 langchain
 langgraph
-llama-index
-llama-index-vector-stores-chroma
-llama-index-llms-openai
 embedchain
 chromadb
 simplejson
@@ -15,10 +12,16 @@ neo4j
 transformers
 py2neo
 ollama
-aura-cli
+pydantic
+pandas
+numpy
+jinja2
+spacy
+langchain_community
 langchain-experimental
 duckduckgo-search
 langchain-mistralai
 langchain-cohere
 langchain-groq
 langchain-google-vertexai
+langchain-anthropic
