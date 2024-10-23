@@ -1,5 +1,0 @@
-2024-10-21 02:20:55,355 - __main__ - INFO - Starting script execution
-2024-10-21 02:20:55,355 - create_agents_graph - INFO - Creating agents graph
-2024-10-21 02:20:55,635 - create_agents_graph - INFO - Agents graph created successfully
-2024-10-21 02:20:55,635 - __main__ - INFO - Starting graph execution...
-2024-10-21 02:20:57,270 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
