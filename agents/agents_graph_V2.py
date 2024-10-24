@@ -10,7 +10,8 @@ from langchain.schema.runnable import Runnable
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.store.base import BaseStore
-from langgraph.store.memory import InMemoryStore
+from langgraph.checkpoint.sqlite import SqliteSaver
+import sqlite3
 from PIL import Image
 import io
 import os
@@ -27,7 +28,6 @@ from langgraph.graph import START, MessagesState, StateGraph
 from datetime import datetime
 from dotenv import load_dotenv
 import os
-from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_openai import ChatOpenAI
 import json
 import logging
@@ -89,7 +89,7 @@ class Level1Agent(BaseAgent):
         super().__init__(*args, **kwargs)
         self.state_schema = self._create_dynamic_state_schema()
         self.attr_mapping = self._create_attr_mapping()
-        self.prompt_dir = os.path.join(os.path.dirname(__file__), 'prompts/level1', self.name)
+        self.prompt_dir = os.path.join(kwargs.get('prompt_dir', ''), 'level1', self.name)
         self.jinja_env = Environment(loader=FileSystemLoader(self.prompt_dir))
         
         # Generate the system prompt once during initialization
@@ -177,13 +177,13 @@ class Level1Agent(BaseAgent):
         # Get the last 5 messages from the conversation
         last_message = self.get_attr(state, "assistant_conversation")[-1]
 
-        if last_message.agent_name == self.name:
-            print(f"Processing question from {self.name}: {last_message.content}")
-            
-            response = self.assistant_llm.invoke(self.create_message(content=prompt.render(question=last_message.content)))
 
-            response = self.create_message(pydantic_to_json(response), agent_name=f"assistant_{self.name}")
+        print(f"Processing question from {self.name}: {last_message.content}")
         
+        response = self.assistant_llm.invoke(self.create_message(content=prompt.render(question=last_message.content)))
+
+        response = self.create_message(pydantic_to_json(response), agent_name=f"assistant_{self.name}")
+    
         
         return { f"{self.name}_assistant_conversation": [response],
             }
@@ -247,7 +247,7 @@ class Level2Agent(BaseAgent):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.state_schema = self._create_dynamic_state_schema()
-        self.prompt_dir = os.path.join(os.path.dirname(__file__), 'prompts/level2', self.name)
+        self.prompt_dir = os.path.join(kwargs.get('prompt_dir', ''), 'level2', self.name)
         self.jinja_env = Environment(loader=FileSystemLoader(self.prompt_dir))
         self.subordinates = kwargs.get('subordinates', [])
         system_prompt_template = self.jinja_env.get_template('system_prompt.j2')
@@ -367,7 +367,7 @@ class Level3Agent(BaseAgent):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.state_schema = Level3State
-        self.prompt_dir = os.path.join(os.path.dirname(__file__), 'prompts/level3', self.name)
+        self.prompt_dir = os.path.join(kwargs.get('prompt_dir', ''), 'level3', self.name)
         self.jinja_env = Environment(loader=FileSystemLoader(self.prompt_dir))
         # Generate the system prompt once during initialization
         system_prompt_template = self.jinja_env.get_template('system_prompt.j2')
@@ -473,323 +473,351 @@ class Level3Agent(BaseAgent):
 ##################################### Final Graph ######################################
 ##########################################################################################
 
+class StateMachines():
+    def __init__(self, prompt_dir):
+        def from_conn_stringx(cls, conn_string: str,) -> "SqliteSaver":
+            return SqliteSaver(conn=sqlite3.connect(conn_string, check_same_thread=False))
+        SqliteSaver.from_conn_stringx=classmethod(from_conn_stringx)
 
-def create_unified_state_schema(level1_agents, level2_agents, ceo_agent):
-    unified_fields = {
-        "level2_3_conversation": (Annotated[List, add_messages], Field(default_factory=lambda: [HumanMessage(content="")])),
-        "level1_3_conversation": (Annotated[List, add_messages], Field(default_factory=lambda: [HumanMessage(content="")])),
-        "level1_2_conversation": (Annotated[List, add_messages], Field(default_factory=lambda: [HumanMessage(content="")])),
-        "ceo_messages": (Annotated[List, add_messages], Field(default_factory=lambda: [HumanMessage(content="")])),
-        "ceo_assistant_conversation": (Annotated[List, add_messages], Field(default_factory=lambda: [HumanMessage(content="")])),
-        "ceo_mode": (Annotated[List[Literal["research_information", "write_to_digest", "communicate_with_directors", "communicate_with_executives", "end"]], operator.add], Field(default_factory=lambda: ["research_information"])),
-        "company_knowledge": (Annotated[List[str], operator.add], Field(default_factory=lambda: [])),
-        "news_insights": (Annotated[List[str], operator.add], Field(default_factory=lambda: [])),
-        "digest": (Annotated[List[str], operator.add], Field(default_factory=lambda: [])),
-        "ceo_runs_counter": (Annotated[int, operator.add], Field(default=0))
-    }
+        from dotenv import load_dotenv
+        load_dotenv()
+        self.memory = SqliteSaver.from_conn_stringx(":memory:")
+        self.prompt_dir = prompt_dir
+        self.final_graph , self.unified_state_schema = self._create_agents_graph()
+        self.config = {"configurable": {"thread_id": "1"}}
 
-    # Add default modes for all agents
-    for agent in level1_agents:
-        unified_fields[f"{agent.name}_mode"] = (Annotated[List[Literal["research", "converse"]], operator.add], Field(default_factory=lambda: ["research"]))
-        unified_fields[f"{agent.name}_assistant_conversation"] = (Annotated[List, add_messages], Field(default_factory=lambda: [HumanMessage(content="")]))
-        unified_fields[f"{agent.name}_messages"] = (Annotated[List, add_messages], Field(default_factory=lambda: [HumanMessage(content="")]))
-        unified_fields[f"{agent.name}_domain_knowledge"] = (Annotated[List[str], operator.add], Field(default_factory=lambda: []))
+    def _create_unified_state_schema(self, level1_agents, level2_agents, ceo_agent):
+        unified_fields = {
+            "level2_3_conversation": (Annotated[List, add_messages], Field(default_factory=lambda: [HumanMessage(content="")])),
+            "level1_3_conversation": (Annotated[List, add_messages], Field(default_factory=lambda: [HumanMessage(content="")])),
+            "level1_2_conversation": (Annotated[List, add_messages], Field(default_factory=lambda: [HumanMessage(content="")])),
+            "ceo_messages": (Annotated[List, add_messages], Field(default_factory=lambda: [HumanMessage(content="")])),
+            "ceo_assistant_conversation": (Annotated[List, add_messages], Field(default_factory=lambda: [HumanMessage(content="")])),
+            "ceo_mode": (Annotated[List[Literal["research_information", "write_to_digest", "communicate_with_directors", "communicate_with_executives", "end"]], operator.add], Field(default_factory=lambda: ["research_information"])),
+            "company_knowledge": (Annotated[List[str], operator.add], Field(default_factory=lambda: [])),
+            "news_insights": (Annotated[List[str], operator.add], Field(default_factory=lambda: [])),
+            "digest": (Annotated[List[str], operator.add], Field(default_factory=lambda: [])),
+            "ceo_runs_counter": (Annotated[int, operator.add], Field(default=0))
+        }
 
-    for agent in level2_agents:
-        unified_fields[f"{agent.name}_mode"] = (Annotated[List[Literal["aggregate_for_ceo", "break_down_for_executives"]], operator.add], Field(default_factory=lambda: ["break_down_for_executives"]))
-        unified_fields[f"{agent.name}_messages"] = (Annotated[List, add_messages], Field(default_factory=lambda: [HumanMessage(content="")]))
+        # Add default modes for all agents
+        for agent in level1_agents:
+            unified_fields[f"{agent.name}_mode"] = (Annotated[List[Literal["research", "converse"]], operator.add], Field(default_factory=lambda: ["research"]))
+            unified_fields[f"{agent.name}_assistant_conversation"] = (Annotated[List, add_messages], Field(default_factory=lambda: [HumanMessage(content="")]))
+            unified_fields[f"{agent.name}_messages"] = (Annotated[List, add_messages], Field(default_factory=lambda: [HumanMessage(content="")]))
+            unified_fields[f"{agent.name}_domain_knowledge"] = (Annotated[List[str], operator.add], Field(default_factory=lambda: []))
 
-    # Create and return the unified state schema
-    UnifiedState = create_model("UnifiedState", **unified_fields, __base__=BaseModel)
-    return UnifiedState
+        for agent in level2_agents:
+            unified_fields[f"{agent.name}_mode"] = (Annotated[List[Literal["aggregate_for_ceo", "break_down_for_executives"]], operator.add], Field(default_factory=lambda: ["break_down_for_executives"]))
+            unified_fields[f"{agent.name}_messages"] = (Annotated[List, add_messages], Field(default_factory=lambda: [HumanMessage(content="")]))
 
-def create_agents_graph():
-    logger = logging.getLogger("create_agents_graph")
-    logger.info("Creating agents graph")
-    load_dotenv()
+        UnifiedState = create_model("UnifiedState", **unified_fields, __base__=BaseModel)
+        return UnifiedState
 
-    # Common configuration
-    tools = []
-    checkpointer2 = MemorySaver()
-    memory_store2 = InMemoryStore()
-    debug = False
+    def _get_agent_names(self, level):
+        base_path = os.path.join(self.prompt_dir, f'level{level}')
+        return [name for name in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, name))]
 
-    # LLM configurations
-    llm_config = {
-        "model": "gpt-3.5-turbo",
-        "temperature": 0.2,
-        "max_tokens": 500
-    }
-    assistant_llm_config = {
-        "model": "gpt-4",
-        "temperature": 0.2,
-        "max_tokens": 500
-    }
+    def _load_agent_config(self, level, agent_name):
+        config_path = os.path.join(self.prompt_dir, f'level{level}', agent_name, 'config.json')
+        with open(config_path, 'r') as f:
+            return json.load(f)
 
-    level2_subordinates = {
-        "supervisor1": ["agent1", "agent2"],
-        "supervisor2": ["agent3", "agent4"],
-    }
+    def _create_agents_graph(self):
+        # Common configuration
+        tools = []
+        debug = False
 
-    # Function to get agent names from folder structure
-    def get_agent_names(level):
-        prompts_dir = os.path.join(os.path.dirname(__file__), 'prompts', f'level{level}')
-        return [name for name in os.listdir(prompts_dir) if os.path.isdir(os.path.join(prompts_dir, name))]
-
-    # Create Level 3 agent (CEO)
-    ceo_name = get_agent_names(3)[0]  # Assuming there's only one CEO
-    ceo_agent = Level3Agent(
-        name=ceo_name,
-        llm="gpt-4",
-        llm_params=llm_config,
-        assistant_llm="gpt-4",
-        assistant_llm_params=assistant_llm_config,
-        tools=tools,  # Make sure to pass the tools here
-        system_message="You are the CEO of the company.",
-        max_iterations=15,
-        checkpointer=checkpointer2,
-        memory_store=memory_store2,
-        debug=debug
-    )
-
-    
-
-    # Create Level 2 agents
-    level2_agents = []
-    for name in get_agent_names(2):
-        level2_agent = Level2Agent(
-            name=name,
-            llm="gpt-3.5-turbo",
-            llm_params=llm_config,
-            assistant_llm="gpt-4",
-            assistant_llm_params=assistant_llm_config,
+        # Create Level 3 agent (CEO)
+        ceo_name = self._get_agent_names(3)[0]  # Assuming there's only one CEO
+        ceo_config = self._load_agent_config(3, ceo_name)
+        ceo_agent = Level3Agent(
+            name=ceo_name,
+            llm=ceo_config['llm_model'],
+            llm_params=ceo_config['llm_config'],
+            assistant_llm=ceo_config['assistant_llm_model'],
+            assistant_llm_params=ceo_config['assistant_llm_config'],
             tools=tools,
-            system_message=f"You are a director and your name is {name}.",
-            max_iterations=10,
-            checkpointer=checkpointer2,
-            memory_store=memory_store2,
             debug=debug,
-            subordinates=level2_subordinates.get(name, [])  # Assign subordinates based on the dictionary
+            prompt_dir=self.prompt_dir
         )
-        level2_agents.append(level2_agent)
 
-    # Create Level 1 agents
-    level1_agents = []
-    for name in get_agent_names(1):
-        level1_agent = Level1Agent(
-            name=name,
-            llm="gpt-3.5-turbo",
-            llm_params=llm_config,
-            assistant_llm="gpt-3.5-turbo",
-            assistant_llm_params=assistant_llm_config,
-            tools=tools,
-            system_message=f"You are an executive in charge of {name}.",
-            max_iterations=5,
-            checkpointer=checkpointer2,
-            memory_store=memory_store2,
-            debug=debug
-        )
-        level1_agents.append(level1_agent)
+        # Create Level 2 agents
+        level2_agents = []
+        for name in self._get_agent_names(2):
+            level2_config = self._load_agent_config(2, name)
+            level2_agent = Level2Agent(
+                name=name,
+                llm=level2_config['llm_model'],
+                llm_params=level2_config['llm_config'],
+                assistant_llm=level2_config['assistant_llm_model'],
+                assistant_llm_params=level2_config['assistant_llm_config'],
+                tools=tools,
+                debug=debug,
+                subordinates=level2_config.get('subordinates', []),
+                prompt_dir=self.prompt_dir
+            )
+            level2_agents.append(level2_agent)
 
+        # Create Level 1 agents
+        level1_agents = []
+        for name in self._get_agent_names(1):
+            level1_config = self._load_agent_config(1, name)
+            level1_agent = Level1Agent(
+                name=name,
+                llm=level1_config['llm_model'],
+                llm_params=level1_config['llm_config'],
+                assistant_llm=level1_config['assistant_llm_model'],
+                assistant_llm_params=level1_config['assistant_llm_config'],
+                tools=tools,
+                debug=debug,
+                prompt_dir=self.prompt_dir
+            )
+            level1_agents.append(level1_agent)
 
-    # After creating all your agents, use this function to create the unified state schema
-    unified_state_schema = create_unified_state_schema(level1_agents, level2_agents, ceo_agent)
+        # After creating all your agents, use this function to create the unified state schema
+        unified_state_schema = self._create_unified_state_schema(level1_agents, level2_agents, ceo_agent)
 
-    workflow = StateGraph(unified_state_schema)
-    workflow.add_node("ceo", ceo_agent.ceo_node)
-    workflow.add_node("ceo_assistant", ceo_agent.assistant_node)
-    workflow.add_node("ceo_tool", ToolNode)
-    workflow.set_entry_point("ceo")
+        workflow = StateGraph(unified_state_schema)
+        workflow.add_node("ceo", ceo_agent.ceo_node)
+        workflow.add_node("ceo_assistant", ceo_agent.assistant_node)
+        workflow.add_node("ceo_tool", ToolNode)
+        workflow.set_entry_point("ceo")
 
-    def create_ceo_router_up(level2_agents):
-        def ceo_router_up(state):
-            return "complete" if all([getattr(state, f"{l2_agent.name}_mode")[-1] == "aggregate_for_ceo" for l2_agent in level2_agents]) else None
-        return ceo_router_up
-    
-    def ceo_router_up_node(state):
-        return None
-    
-    workflow.add_node("ceo_router_up", ceo_router_up_node)
-    
-    def ceo_router_down(state):
-        # This function will be called when the router node is executed
-        return None
-
-    workflow.add_node("ceo_router_down" , ceo_router_down  )
-
-    for l1_agent in level1_agents:
-
-        tool_node = ToolNode(l1_agent.tools)
-        workflow.add_node(f"agent_{l1_agent.name}", l1_agent.level1_node)
-        workflow.add_node(f"assistant_{l1_agent.name}", l1_agent.assistant_node)
-        workflow.add_node(f"tools_{l1_agent.name}", tool_node)
-
-    for l2_agent in level2_agents:
-        # Add Level 2 agent node
-        workflow.add_node(f"{l2_agent.name}_supervisor", l2_agent.level2_supervisor_node)
-
-    # Add conditional edges based on the should_continue function
-    workflow.add_conditional_edges(
-        "ceo",
-        ceo_agent.should_continue,
-        {
-            "assistant": "ceo_assistant",
-            "ceo": "ceo",
-            "directors": f"ceo_router_down" ,  
-            "executives": f"ceo_router_down" , 
-            END: END
-        }
-    )
-    workflow.add_conditional_edges(
-        "ceo_assistant",
-        ceo_agent.should_continue_assistant,
-        {
-            "continue": "ceo_tool",
-            "ceo": "ceo",
-        }
-    )
-
-    workflow.add_edge("ceo_tool", "ceo_assistant")
-
-    for l2_agent in level2_agents:
-
-        workflow.add_edge("ceo_router_down", f"{l2_agent.name}_supervisor")
-
-
-        router_name_down = f"{l2_agent.name}_router_down"
+        def create_ceo_router_up(level2_agents):
+            def ceo_router_up(state):
+                return "complete" if all([getattr(state, f"{l2_agent.name}_mode")[-1] == "aggregate_for_ceo" for l2_agent in level2_agents]) else None
+            return ceo_router_up
         
-        def create_level2_router_down(agent_name):
-            def level2_router(state):
-                return None
-            level2_router.__name__ = f"{agent_name}_router_down"
-            return level2_router
+        def ceo_router_up_node(state):
+            return None
         
-        router_function_down = create_level2_router_down(l2_agent.name)
-
-        workflow.add_node(router_name_down, router_function_down)
-
-        router_name_up = f"{l2_agent.name}_router_up"
-
-        def create_level2_router_up(agent_name, subordinates):
-            def level2_router(state):
-                return "complete" if all([state.get(f"{sub}_mode")[-1] == "converse_with_superiors" 
-                                        for sub in subordinates]) else None
-            level2_router.__name__ = f"{agent_name}_router_up"
-            return level2_router
+        workflow.add_node("ceo_router_up", ceo_router_up_node)
         
-        def create_level2_router_up_node(agent_name):
-            def level2_router_node(state):
-                return None
-            level2_router_node.__name__ = f"{agent_name}_router_up"
-            return level2_router_node
+        def ceo_router_down(state):
+            # This function will be called when the router node is executed
+            return None
 
-        router_function_up = create_level2_router_up(l2_agent.name, l2_agent.subordinates)
-        router_node_up = create_level2_router_up_node(l2_agent.name)
-        workflow.add_node(router_name_up, router_node_up)
+        workflow.add_node("ceo_router_down" , ceo_router_down  )
 
-        for l1_agent in level1_agents :
-            if l1_agent.name in l2_agent.subordinates:
-                workflow.add_edge(router_name_down , f"agent_{l1_agent.name}")
+        for l1_agent in level1_agents:
 
-                workflow.add_conditional_edges(
-                f"agent_{l1_agent.name}",
-                lambda s: "assistant_" + l1_agent.name if l1_agent.get_attr(s, "mode")[-1] == "research" else "router",
-                    {
-                        "assistant_" + l1_agent.name: f"assistant_" + l1_agent.name,
-                        "router": router_name_up
-                    }
-                )
-                workflow.add_conditional_edges(f"assistant_{l1_agent.name}", l1_agent.should_continue,    {
-                # If `tools`, then we call the tool node.
-                    "continue": f"tools_{l1_agent.name}",
-                # Otherwise we finish.
-                    f"agent_{l1_agent.name}": f"agent_{l1_agent.name}",
-                }, 
-                )
-                workflow.add_edge(f"tools_{l1_agent.name}", f"assistant_{l1_agent.name}")
+            tool_node = ToolNode(l1_agent.tools)
+            workflow.add_node(f"agent_{l1_agent.name}", l1_agent.level1_node)
+            workflow.add_node(f"assistant_{l1_agent.name}", l1_agent.assistant_node)
+            workflow.add_node(f"tools_{l1_agent.name}", tool_node)
 
-        # Add conditional edges for the router
+        for l2_agent in level2_agents:
+            # Add Level 2 agent node
+            workflow.add_node(f"{l2_agent.name}_supervisor", l2_agent.level2_supervisor_node)
+
+        workflow.add_node("END", lambda state: END)
+        # Add conditional edges based on the should_continue function
         workflow.add_conditional_edges(
-            router_name_up,
-            router_function_up,
+            "ceo",
+            ceo_agent.should_continue,
             {
-                "complete": f"{l2_agent.name}_supervisor",
-                None: router_name_up  # Loop back if not all subordinates are ready
+                "assistant": "ceo_assistant",
+                "ceo": "ceo",
+                "directors": f"ceo_router_down" ,  
+                "executives": f"ceo_router_down" , 
+                END: "END"
             }
         )
+        workflow.set_finish_point("END")
+
         workflow.add_conditional_edges(
-            f"{l2_agent.name}_supervisor",
-            l2_agent.should_continue,
-                        {
-                "aggregate_for_ceo": "ceo_router_up",
-                "break_down_for_executives": router_name_down  # Loop back if not all subordinates are ready
+            "ceo_assistant",
+            ceo_agent.should_continue_assistant,
+            {
+                "continue": "ceo_tool",
+                "ceo": "ceo",
             }
-
-
-            
         )
-    workflow.add_conditional_edges(
-        "ceo_router_up",
-        create_ceo_router_up(level2_agents),
-        {
-            "complete": "ceo",
-            None: "ceo_router_up"  # Loop back if not all subordinates are ready
-        }
-    )
 
+        workflow.add_edge("ceo_tool", "ceo_assistant")
+
+        for l2_agent in level2_agents:
+
+            workflow.add_edge("ceo_router_down", f"{l2_agent.name}_supervisor")
+
+
+            router_name_down = f"{l2_agent.name}_router_down"
+
+            def create_level2_router_down(agent_name):
+                def level2_router(state):
+                    return None
+                level2_router.__name__ = f"{agent_name}_router_down"
+                return level2_router
+        
+            router_function_down = create_level2_router_down(l2_agent.name)
+
+            workflow.add_node(router_name_down, router_function_down)
+
+            router_name_up = f"{l2_agent.name}_router_up"
+
+            def create_level2_router_up(agent_name, subordinates):
+                def level2_router(state):
+                    return "complete" if all([getattr(state, f"{sub}_mode")[-1] == "converse" 
+                                              for sub in subordinates]) else None
+                level2_router.__name__ = f"{agent_name}_router_up"
+                return level2_router
             
-    # Compile the main graph
-    final_graph = workflow.compile()
-    #mermaid_png = final_graph.get_graph().draw_mermaid_png()
-    # img = Image.open(io.BytesIO(mermaid_png))
-    #img.save(f'level3_agent_graph.png')
-    logger.info("Agents graph created successfully")
-    return final_graph , unified_state_schema
+            def create_level2_router_up_node(agent_name):
+                def level2_router_node(state):
+                    return None
+                level2_router_node.__name__ = f"{agent_name}_router_up"
+                return level2_router_node
 
-# Add this at the end of your file:
+            router_function_up = create_level2_router_up(l2_agent.name, l2_agent.subordinates)
+            router_node_up = create_level2_router_up_node(l2_agent.name)
+            workflow.add_node(router_name_up, router_node_up)
+
+            for l1_agent in level1_agents :
+                if l1_agent.name in l2_agent.subordinates:
+                    workflow.add_edge(router_name_down , f"agent_{l1_agent.name}")
+
+                    workflow.add_conditional_edges(
+                    f"agent_{l1_agent.name}",
+                    #lambda s: "assistant" if l1_agent.get_attr(s, "mode")[-1] == "research" else "router",
+                    lambda state: "assistant" if l1_agent.get_attr(state, "mode")[-1] == "research" else "router",
+                        {
+                            "assistant" : f"assistant_{l1_agent.name}",
+                            "router": router_name_up
+                        }
+                    )
+                    workflow.add_conditional_edges(f"assistant_{l1_agent.name}", l1_agent.should_continue,
+                    {
+                    # If `tools`, then we call the tool node.
+                        "continue": f"tools_{l1_agent.name}",
+                    # Otherwise we finish.
+                        "executive_agent" : f"agent_{l1_agent.name}",
+                    }, 
+                    )
+                    workflow.add_edge(f"tools_{l1_agent.name}", f"assistant_{l1_agent.name}")
+
+            # Add conditional edges for the router
+            workflow.add_conditional_edges(
+                router_name_up,
+                router_function_up,
+                {
+                    "complete": f"{l2_agent.name}_supervisor",
+                    None: router_name_up  # Loop back if not all subordinates are ready
+                }
+            )
+            workflow.add_conditional_edges(
+                f"{l2_agent.name}_supervisor",
+                l2_agent.should_continue,
+                            {
+                    "aggregate_for_ceo": "ceo_router_up",
+                    "break_down_for_executives": router_name_down  # Loop back if not all subordinates are ready
+                }
+
+
+                
+            )
+        workflow.add_conditional_edges(
+            "ceo_router_up",
+            create_ceo_router_up(level2_agents),
+            {
+                "complete": "ceo",
+                None: "ceo_router_up"  # Loop back if not all subordinates are ready
+            }
+        )
+
+                
+        # Compile the main graph
+        final_graph = workflow.compile(
+            checkpointer=self.memory,
+            interrupt_before=[
+                "ceo",
+                *[f"{l2_agent.name}_supervisor" for l2_agent in level2_agents],
+                *[f"agent_{l1_agent.name}" for l1_agent in level1_agents]
+            ]
+        )
+        
+        logger.info("Agents graph created successfully")
+
+        return final_graph , unified_state_schema
+
+    def get_graph_image(self, name):   
+        Image.open(io.BytesIO(self.final_graph.get_graph().draw_mermaid_png())).save(f'{name}.png')
+    
+    def start(self, initial_state):
+        result = self.final_graph.invoke(initial_state, self.config)
+        if result is None:
+            values = self.final_graph.get_state(self.config).values
+            last_state = next(iter(values))
+            return values[last_state]
+        return result
+    
+    def resume(self, new_state: dict):
+        # Get the current state values
+        current_state = self.final_graph.get_state(self.config).values
+        # Update the current state with new values from new_state
+        if new_state:  # This checks if new_state is not empty
+            state = {}
+            for key, value in current_state.items():
+                for k, v in new_state.items():
+                    if k == key:
+                        state[key] = v
+                    else:
+                        state[key] = value
+        else:
+            state = current_state
+
+        # Update the state in the graph
+        if state != current_state:
+            self.final_graph.update_state(self.config, state)
+        
+        # Invoke the graph with the updated state
+        result = self.final_graph.invoke(None, self.config)
+        
+        if result is None:
+            print("this is the result",result)
+            values = self.final_graph.get_state(self.config).values
+            last_state = next(iter(values))
+            return self.final_graph.get_state(self.config).values[last_state]
+        
+        return result
+
+    def update_config(self, new_config: dict):
+        """
+        Update the current configuration with new values.
+        
+        :param new_config: A dictionary containing the new configuration values.
+        """
+        self.config.update(new_config)
+        self.logger.info(f"Configuration updated: {self.config}")
+
 
 if __name__ == "__main__":
     logger = setup_logging()
     logger.info("Starting script execution")
 
-    # Create the graph
-    graph, UnifiedState = create_agents_graph()
+    # Create the StateMachines instance with the prompt directory
+    state_machines = StateMachines("Data/Prompts")
 
-
-    # Create an initial state with default values
-    initial_state = UnifiedState()
-
+    # Create an initial state with default values using the unified state schema
+    initial_state = state_machines.unified_state_schema()
+    save_graph_img = state_machines.get_graph_image("agents_graph")
     # Set specific initial values
     initial_state.company_knowledge = ["Our company is a leading tech firm specializing in AI and machine learning solutions."]
     initial_state.news_insights = ["Recent advancements in natural language processing have opened new opportunities in the market."]
     initial_state.ceo_mode = ["research_information"]
 
-    # Run the graph
+    # Start the graph execution
     logger.info("Starting graph execution...")
-    for step in graph.stream(initial_state):
-        logger.info(f"Step: {step}")
+    result = state_machines.start(initial_state)
+    
+    while result is not None:
+        logger.info(f"Current state: {result}")
+        # Here you can add logic to handle the current state and provide new values
+        # For example:
+        new_values = {}  # Add any necessary updates to the state
+        result = state_machines.resume(new_values)
 
     logger.info("Graph execution completed.")
-    logger.info("Final state:")
-    logger.info(initial_state)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
