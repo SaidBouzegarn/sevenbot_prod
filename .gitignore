@@ -1,0 +1,21 @@
+# Ignore logs folder
+logs/
+
+# Ignore .env file
+.env
+
+# Ignore virtual environment folder
+venv/
+
+# Python-specific ignores
+__pycache__/
+*.py[cod]
+*$py.class
+
+# OS-specific ignores
+.DS_Store
+Thumbs.db
+
+# IDE-specific ignores (optional, uncomment if needed)
+# .vscode/
+# .idea/
