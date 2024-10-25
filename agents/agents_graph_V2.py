@@ -1,4 +1,5 @@
-from typing import List, Optional, Dict, Any, Union, Callable, Sequence, TypedDict, Annotated, Literal, Type, get_origin, get_args
+from typing import List, Optional, Dict, Any, Union, Callable, Sequence, Literal, Type, get_origin, get_args
+from typing_extensions import Annotated, TypedDict
 from langchain_core.language_models import BaseLanguageModel
 from langchain_core.tools import BaseTool
 from langchain_core.messages import BaseMessage, AIMessage, SystemMessage, HumanMessage
@@ -179,8 +180,11 @@ class Level1Agent(BaseAgent):
 
 
         print(f"Processing question from {self.name}: {last_message.content}")
-        
-        response = self.assistant_llm.invoke(self.create_message(content=prompt.render(question=last_message.content)))
+        assistant_message = self.create_message(content=prompt.render(question=last_message.content))
+        try : 
+            response = self.assistant_llm.invoke(assistant_message)
+        except:
+            response = self.assistant_llm.invoke(f"Question from executive : {last_message.content}.")
 
         response = self.create_message(pydantic_to_json(response), agent_name=f"assistant_{self.name}")
     
@@ -475,6 +479,8 @@ class Level3Agent(BaseAgent):
 
 class StateMachines():
     def __init__(self, prompt_dir):
+        self.logger = logging.getLogger(__name__)
+        
         def from_conn_stringx(cls, conn_string: str,) -> "SqliteSaver":
             return SqliteSaver(conn=sqlite3.connect(conn_string, check_same_thread=False))
         SqliteSaver.from_conn_stringx=classmethod(from_conn_stringx)
@@ -611,7 +617,7 @@ class StateMachines():
             # Add Level 2 agent node
             workflow.add_node(f"{l2_agent.name}_supervisor", l2_agent.level2_supervisor_node)
 
-        workflow.add_node("END", lambda state: END)
+        workflow.add_node("END", lambda state: {})
         # Add conditional edges based on the should_continue function
         workflow.add_conditional_edges(
             "ceo",
@@ -736,7 +742,7 @@ class StateMachines():
             ]
         )
         
-        logger.info("Agents graph created successfully")
+        self.logger.info("Agents graph created successfully")
 
         return final_graph , unified_state_schema
 
@@ -790,13 +796,23 @@ class StateMachines():
         self.config.update(new_config)
         self.logger.info(f"Configuration updated: {self.config}")
 
-
 if __name__ == "__main__":
-    logger = setup_logging()
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+
     logger.info("Starting script execution")
 
-    # Create the StateMachines instance with the prompt directory
-    state_machines = StateMachines("Data/Prompts")
+    logger.info("About to create StateMachines instance")
+    try:
+        state_machines = StateMachines("Data/Prompts")
+        logger.info("StateMachines instance created successfully")
+    except Exception as e:
+        logger.error(f"Error creating StateMachines instance: {str(e)}", exc_info=True)
+        sys.exit(1)
 
     # Create an initial state with default values using the unified state schema
     initial_state = state_machines.unified_state_schema()
@@ -818,6 +834,7 @@ if __name__ == "__main__":
         result = state_machines.resume(new_values)
 
     logger.info("Graph execution completed.")
+
 
 
 
