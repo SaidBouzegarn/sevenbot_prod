@@ -3,7 +3,14 @@ from dotenv import load_dotenv, set_key
 from neo4j import GraphDatabase
 from langchain_community.graphs import Neo4jGraph
 from langchain_openai import ChatOpenAI
-from langchain.prompts.chat import ChatPromptTemplate
+from langchain_mistralai import ChatMistralAI
+from langchain_cohere import ChatCohere
+from langchain_groq import ChatGroq
+from langchain_google_vertexai import ChatVertexAI
+from langchain_community.chat_models import ChatOllama
+from langchain_nvidia_ai_endpoints import ChatNVIDIA
+from langchain_anthropic import ChatAnthropic
+from langchain_fireworks import ChatFireworks
 from langchain_experimental.graph_transformers import LLMGraphTransformer
 from langchain.chains import GraphCypherQAChain
 from typing import List, Optional, Dict, Any, Union
@@ -19,7 +26,10 @@ from langchain_openai import OpenAIEmbeddings
 from langchain.schema import SystemMessage, HumanMessage
 import uuid
 import json
-
+from langchain.prompts.chat import ChatPromptTemplate
+from langchain.base_language import BaseLanguageModel
+import requests
+import re
 # Configure logging
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s',
@@ -42,24 +52,29 @@ class GraphKnowledgeManager:
         self, 
         name: str, 
         level: str,
-        prompt_dir: str, 
+        prompt_dir: str,
+        aura_instance_id: str,  # Add this parameter
+        aura_instance_name: str,  # Add this parameter
+        neo4j_uri: str,  # Add this parameter
+        neo4j_username: str,  # Add this parameter
+        neo4j_password: str,  # Add this parameter
         llm_models: str = "gpt-4-turbo", 
         cypher_llm_model: str = "gpt-4",
         qa_llm_model: str = "gpt-3.5-turbo",
         cypher_llm_params: Dict[str, Any] = None,
         qa_llm_params: Dict[str, Any] = None,
-        chain_verbose: bool = True,
+        chain_verbose: bool = False,
         chain_callback_manager: Optional[Any] = None,
         chain_memory: Optional[Any] = None,
-        similarity_threshold: float = 0.7,
-        max_iterations: int = 3,
-        execution_timeout: int = 60,
-        max_retries: int = 2,
+        similarity_threshold: float = 0.85,
+        max_iterations: int = 5,
+        execution_timeout: int = 30,
+        max_retries: int = 3,
         return_intermediate_steps: bool = False,
         handle_retries: bool = True,
-        allowed_nodes: List[str] = None,
-        allowed_relationships: List[str] = None,
-        strict_mode: bool = True,
+        allowed_nodes: Optional[List[str]] = None,
+        allowed_relationships: Optional[List[str]] = None,
+        strict_mode: bool = False,
         node_properties: Union[bool, List[str]] = False,
         relationship_properties: Union[bool, List[str]] = False,
         ignore_tool_usage: bool = False,
@@ -90,130 +105,135 @@ class GraphKnowledgeManager:
         self.node_properties = node_properties
         self.relationship_properties = relationship_properties
         self.ignore_tool_usage = ignore_tool_usage
-        self.aura_instance_name = f"aura-{self.name}"
+        
+        # Store Neo4j instance details
+        self.aura_instance_id = aura_instance_id
+        self.aura_instance_name = aura_instance_name
+        self.neo4j_uri = neo4j_uri
+        self.neo4j_username = neo4j_username
+        self.neo4j_password = neo4j_password
+        
         self.neo4j_graph = None
         self.jinja_env = Environment(loader=FileSystemLoader(os.path.join(self.prompt_dir)))
         self.graph_system_prompt = self._load_graph_system_prompt()
-        self.schema = self._load_schema()
+        self.schema = None
         
-        self.neo4j_uri = os.getenv('NEO4J_URI')
-        self.neo4j_user = os.getenv('NEO4J_USERNAME')
-        self.neo4j_password = os.getenv('NEO4J_PASSWORD')
+        self.ensure_connection()
         
-        self.ensure_db_exists_and_connect()
+        # Initialize GraphCypherQAChain with default values
+        self.cypher_chain = None
         
-        # Initialize GraphCypherQAChain
-        self.cypher_chain = GraphCypherQAChain.from_llm(
-            cypher_llm=self._create_cypher_llm(),
-            qa_llm=self._create_qa_llm(),
-            graph=self.neo4j_graph,
-            verbose=self.chain_verbose,
-            callback_manager=self.chain_callback_manager,
-            memory=self.chain_memory,
-            prompt_template=self._create_prompt_template(),
-            similarity_threshold=self.similarity_threshold,
-            max_iterations=self.max_iterations,
-            execution_timeout=self.execution_timeout,
-            max_retries=self.max_retries,
-            return_intermediate_steps=self.return_intermediate_steps,
-            handle_retries=self.handle_retries,
-            allow_dangerous_requests=True  # Add this line
-        )
-        
-        # Initialize LLMGraphTransformer
-        graph_llm = ChatOpenAI(
-            model_name=self.llm_models,
-            **self.llm_params
-        )
-        
-        graph_prompt = ChatPromptTemplate.from_template(self.graph_system_prompt)
-        
-        self.llm_transformer = LLMGraphTransformer(
-            llm=graph_llm,
-            allowed_nodes=self.allowed_nodes,
-            allowed_relationships=self.allowed_relationships,
-            prompt=graph_prompt,
-            strict_mode=self.strict_mode,
-            node_properties=self.node_properties,
-            relationship_properties=self.relationship_properties,
-            ignore_tool_usage=self.ignore_tool_usage
-        )
+        # Initialize LLMGraphTransformer        
+        self.llm_transformer = None
+
+    def _escape_single_brackets(self, text: str) -> str:
+        """
+        Replace single brackets with double brackets to escape them properly.
+        Ignores already doubled brackets.
+        """
+        # Replace single { with {{ if not already {{
+        text = re.sub(r'(?<!\{)\{(?!\{)', '{{', text)
+        # Replace single } with }} if not already }}
+        text = re.sub(r'(?<!\})\}(?!\})', '}}', text)
+        return text
 
     def _create_prompt_template(self) -> ChatPromptTemplate:
-        schema = self.schema
+        # First ensure schema is loaded
+        if self.schema is None:
+            self.schema = self._load_schema()
         
         # Format the schema for better readability
         formatted_schema = "Nodes:\n"
-        for node in schema["nodes"]:
+        for node in self.schema["nodes"]:
             formatted_schema += f"- {node['label']}: {', '.join(node['properties'])}\n"
         
         formatted_schema += "\nRelationships:\n"
-        for rel in schema["relationships"]:
-            formatted_schema += f"- {rel['start_node']}-[{rel['type']}]->{rel['end_node']}: {', '.join(rel['properties'])}\n"
+        for rel in self.schema["relationships"]:
+            formatted_schema += f"- {rel['type']}: {', '.join(rel['properties'])}\n"
 
-        template = f"""
-        You are an AI assistant for querying a Neo4j graph database about PEPFAR (President's Emergency Plan for AIDS Relief) and its impact. Translate the user's questions into Cypher queries.
-        Only provide the Cypher query without any explanations or additional text.
-        Ensure that the queries are optimized and follow best practices for graph databases.
+        # Escape any single brackets in the formatted schema
+        formatted_schema = self._escape_single_brackets(formatted_schema)
 
-        The current database schema is:
-        {{formatted_schema}}
+        messages = [
+            SystemMessage(content=f"""You are an AI assistant for querying a Neo4j graph database about PEPFAR (President's Emergency Plan for AIDS Relief) and its impact. Translate the user's questions into Cypher queries.
+Only provide the Cypher query without any explanations or additional text.
+Ensure that the queries are optimized and follow best practices for graph databases.
 
-        Use this schema information to construct your Cypher queries.
+The current database schema is:
+{self.schema}
 
-        User question: {{question}}
+Use this schema information to construct your Cypher queries."""),
+            HumanMessage(content="{input}")
+        ]
 
-        Cypher query:
-        """
-        return ChatPromptTemplate.from_messages([
-            ("system", template),
-            ("human", "{{question}}")
-        ])
+        return ChatPromptTemplate.from_messages(messages)
 
-    def _create_cypher_llm(self) -> ChatOpenAI:
-        return ChatOpenAI(
-            temperature=self.cypher_llm_params.get("temperature", 0),
-            model_name=self.cypher_llm_model,
-            **self.cypher_llm_params
-        )
+    def _construct_llm(self, llm_name: str, llm_params: Dict[str, Any]) -> BaseLanguageModel:
+        """Construct the appropriate LLM based on the input string and parameters."""
+        OPENAI_MODELS = ["gpt-3.5-turbo", "gpt-4", "gpt-4-turbo"]
+        MISTRAL_MODELS = ["mistral-tiny", "mistral-small", "mistral-medium"]
+        COHERE_MODELS = ["command", "command-light", "command-nightly"]
+        GROQ_MODELS = ["llama2-70b-4096", "mixtral-8x7b-32768"]
+        VERTEXAI_MODELS = ["chat-bison", "chat-bison-32k"]
+        OLLAMA_MODELS = ["llama2", "mistral", "dolphin-phi"]
+        NVIDIA_MODELS = ["mixtral-8x7b", "llama2-70b"]
+        ANTHROPIC_MODELS = ["claude-2", "claude-instant-1"]
+        FIREWORKS_MODELS = ["llama-v2-7b", "llama-v2-13b", "llama-v2-70b"]
 
-    def _create_qa_llm(self) -> ChatOpenAI:
-        return ChatOpenAI(
-            temperature=self.qa_llm_params.get("temperature", 0),
-            model_name=self.qa_llm_model,
-            **self.qa_llm_params
-        )
+        if llm_name in OPENAI_MODELS:
+            return ChatOpenAI(model_name=llm_name, **llm_params)
+        elif llm_name in MISTRAL_MODELS:
+            return ChatMistralAI(model=llm_name, **llm_params)
+        elif llm_name in COHERE_MODELS:
+            return ChatCohere(model=llm_name, **llm_params)
+        elif llm_name in GROQ_MODELS:
+            return ChatGroq(model=llm_name, **llm_params)
+        elif llm_name in VERTEXAI_MODELS:
+            return ChatVertexAI(model_name=llm_name, **llm_params)
+        elif llm_name in OLLAMA_MODELS:
+            return ChatOllama(model=llm_name, **llm_params)
+        elif llm_name in NVIDIA_MODELS:
+            return ChatNVIDIA(model=llm_name, **llm_params)
+        elif llm_name in ANTHROPIC_MODELS:
+            return ChatAnthropic(model=llm_name, **llm_params)
+        elif llm_name in FIREWORKS_MODELS:
+            return ChatFireworks(model=llm_name, **llm_params)
+        else:
+            raise ValueError(f"Unsupported model: {llm_name}")
 
-    def ensure_db_exists_and_connect(self):
-        if not all([self.neo4j_uri, self.neo4j_user, self.neo4j_password]):
-            self.create_neo4j_instance()
-        
+    def ensure_connection(self):
+        """Connect to the existing Neo4j instance."""
         try:
+            # Connect using Neo4jGraph for LangChain operations
             self.neo4j_graph = Neo4jGraph(
                 url=self.neo4j_uri,
-                username=self.neo4j_user,
+                username=self.neo4j_username,
                 password=self.neo4j_password
             )
-            logger.info(f"Connected to Neo4j instance: {self.neo4j_uri}")
+            logger.info(f"Connected to Neo4j Aura instance: {self.aura_instance_name}")
+            
         except Exception as e:
             logger.error(f"Failed to connect to Neo4j instance: {e}")
             raise
 
-    def create_neo4j_instance(self):
-        # For demonstration purposes, we'll use a local Neo4j instance
-        # In a real-world scenario, you'd interact with Neo4j Aura's API to create a new instance
-        self.neo4j_uri = "bolt://localhost:7687"
-        self.neo4j_user = "neo4j"
-        self.neo4j_password = str(uuid.uuid4())  # Generate a random password
-        
-        # Save the connection details to .env file
-        env_file_path = '.env'
-        set_key(env_file_path, 'NEO4J_URI', self.neo4j_uri)
-        set_key(env_file_path, 'NEO4J_USERNAME', self.neo4j_user)
-        set_key(env_file_path, 'NEO4J_PASSWORD', self.neo4j_password)
-        logger.info(f"Neo4j connection details saved to '{env_file_path}'.")
-
     def query_graph(self, question: str) -> Optional[Any]:
+        if self.cypher_chain is None:
+            self.cypher_chain = GraphCypherQAChain.from_llm(
+                cypher_llm=self._construct_llm(self.cypher_llm_model, self.cypher_llm_params),
+                qa_llm=self._construct_llm(self.qa_llm_model, self.qa_llm_params),
+                graph=self.neo4j_graph,
+                verbose=self.chain_verbose,
+                callback_manager=self.chain_callback_manager,
+                memory=self.chain_memory,
+                prompt_template=self._create_prompt_template(),
+                similarity_threshold=self.similarity_threshold,
+                max_iterations=self.max_iterations,
+                execution_timeout=self.execution_timeout,
+                max_retries=self.max_retries,
+                return_intermediate_steps=self.return_intermediate_steps,
+                handle_retries=self.handle_retries,
+                allow_dangerous_requests=True
+            )        
         try:
             response = self.cypher_chain.invoke(question)
             logger.info(f"Query result: {response}")
@@ -223,6 +243,19 @@ class GraphKnowledgeManager:
             return None
 
     def populate_knowledge_graph(self, texts: List[str], batch_size: int = 100):
+        graph_prompt = ChatPromptTemplate.from_template(self.graph_system_prompt)
+
+        if self.llm_transformer is None:
+            self.llm_transformer = LLMGraphTransformer(
+                llm=self._construct_llm(self.llm_models, self.llm_params),
+                allowed_nodes=self.allowed_nodes,
+                allowed_relationships=self.allowed_relationships,
+                prompt=graph_prompt,
+                strict_mode=self.strict_mode,
+                node_properties=self.node_properties,
+                relationship_properties=self.relationship_properties,
+                ignore_tool_usage=self.ignore_tool_usage
+            )
         for i in range(0, len(texts), batch_size):
             batch = texts[i:i+batch_size]
             documents = [Document(page_content=text) for text in batch]
@@ -240,7 +273,7 @@ class GraphKnowledgeManager:
 
     def delete_database(self):
         try:
-            with GraphDatabase.driver(self.neo4j_uri, auth=(self.neo4j_user, self.neo4j_password)) as driver:
+            with GraphDatabase.driver(self.neo4j_uri, auth=(self.neo4j_username, self.neo4j_password)) as driver:
                 with driver.session() as session:
                     session.run("MATCH (n) DETACH DELETE n")
             logger.info("Deleted all nodes and relationships in the database.")
@@ -272,44 +305,224 @@ class GraphKnowledgeManager:
         ]
 
     def _load_graph_system_prompt(self):
+        template = self.jinja_env.get_template('graph_system_prompt.j2')
+        return template.render()
+
+
+
+    def _load_schema(self) -> dict:
+        """Get the current schema from the Neo4j database."""
         try:
-            template = self.jinja_env.get_template('graph_system_prompt.j2')
-            return template.render()
-        except Exception as e:
-            logger.error(f"Error loading graph system prompt: {e}")
-            # Fallback to a default prompt if the template can't be loaded
-            return """
-            You are an AI assistant specialized in transforming unstructured text into graph structures for a Neo4j database.
-            Identify entities, relationships, and properties from the given text and represent them in a graph format.
+            # Get node labels and their properties
+            nodes_query = """
+            CALL db.schema.nodeTypeProperties()
+            YIELD nodeType, propertyName
+            RETURN collect({
+                label: nodeType,
+                properties: collect(propertyName)
+            }) as nodes
             """
+            
+            # Get relationship types and their properties
+            rels_query = """
+            CALL db.schema.relationshipTypeProperties()
+            YIELD relationshipType, propertyName
+            WITH relationshipType, collect(propertyName) as props
+            MATCH (start)-[r:${relationshipType}]->(end)
+            RETURN collect({
+                type: relationshipType,
+                properties: props,
+                start_node: labels(start)[0],
+                end_node: labels(end)[0]
+            }) as relationships
+            """
+            
+            nodes = self.neo4j_graph.query(nodes_query)
+            relationships = self.neo4j_graph.query(rels_query)
+            
+            schema = {
+                "nodes": nodes[0]["nodes"],
+                "relationships": relationships[0]["relationships"]
+            }
+            
+            logger.info("Successfully loaded schema from database")
+            return schema
+            
+        except Exception as e:
+            logger.error(f"Error loading schema from database: {e}")
+            # Return a minimal default schema structure
+            return {
+                "nodes": [],
+                "relationships": []
+            }
 
-    def check_aura_instance(self):
+    def disambiguate(self):
+        """
+        Resolve duplicate entities and relationships in the graph by identifying and merging
+        nodes and relationships that represent the same concepts.
+        """
         try:
-            result = subprocess.run(
-                ["aura", "instances", "list", "--format", "json"],
-                capture_output=True, text=True, check=True
-            )
-            instances = json.loads(result.stdout)
-            for instance in instances:
-                if instance['name'] == self.aura_instance_name:
-                    logger.info(f"Aura instance '{self.aura_instance_name}' found.")
-                    return True
-            logger.warning(f"Aura instance '{self.aura_instance_name}' not found.")
-            return False
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Error checking Aura instance: {e}")
-            logger.error(f"Command output: {e.stdout}")
-            logger.error(f"Error output: {e.stderr}")
-            return False
+            # First connect to the specific database
+            logger.info(f"Starting disambiguation process for database: {self.aura_instance_name}")
+            
+            # Get all nodes
+            nodes_query = """
+            MATCH (n) 
+            RETURN DISTINCT n.name as name, labels(n) as labels, 
+            properties(n) as properties
+            """
+            nodes = self.neo4j_graph.query(nodes_query)
+            
+            # Get all relationships
+            rels_query = """
+            MATCH ()-[r]->() 
+            RETURN DISTINCT type(r) as type, 
+            startNode(r).name as start_name, 
+            endNode(r).name as end_name,
+            properties(r) as properties
+            """
+            relationships = self.neo4j_graph.query(rels_query)
 
-    def _load_schema(self):
-        schema_path = os.path.join(self.prompt_dir, 'schema.json')
+            # Process nodes in batches
+            batch_size = 15  # Adjust based on your needs
+            node_batches = [nodes[i:i+batch_size] for i in range(0, len(nodes), batch_size)]
+            
+            for i, node_batch in enumerate(node_batches, 1):
+                self._merge_similar_nodes(node_batch)
+                logger.info(f"Processed node batch {i}/{len(node_batches)}")
+
+            # Process relationships in batches
+            rel_batches = [relationships[i:i+batch_size] for i in range(0, len(relationships), batch_size)]
+            
+            for i, rel_batch in enumerate(rel_batches, 1):
+                self._merge_similar_relationships(rel_batch)
+                logger.info(f"Processed relationship batch {i}/{len(rel_batches)}")
+
+        except Exception as e:
+            logger.error(f"Error during disambiguation: {e}")
+            raise
+
+    def _merge_similar_nodes(self, nodes):
+        """Merge nodes that represent the same entity."""
         try:
-            with open(schema_path, 'r') as schema_file:
-                return json.load(schema_file)
-        except FileNotFoundError:
-            logger.warning(f"Schema file not found at {schema_path}. Using default schema.")
-            return ''
+            # Create a prompt for the LLM to identify similar nodes
+            node_data = [
+                {
+                    "name": node["name"],
+                    "labels": node["labels"],
+                    "properties": node["properties"]
+                }
+                for node in nodes if node["name"]  # Filter out nodes without names
+            ]
+            
+            if not node_data:
+                return
+
+            messages = [
+                SystemMessage(content="""You are a data processing assistant specialized in identifying duplicate entities in Neo4j graphs.
+                Your task is to analyze nodes and identify which ones represent the same real-world entity despite having different representations.
+
+                Rules for identifying duplicates:
+                1. Consider nodes with minor spelling variations or typographical differences as duplicates
+                   Example: "John Smith" and "Jon Smith" might be the same person
+                2. Consider nodes with different formats but same semantic meaning as duplicates
+                   Example: "USA" and "United States of America" refer to the same country
+                3. Consider nodes that refer to the same real-world entity as duplicates, even if described differently
+                   Example: "NYC" and "New York City" refer to the same place
+                4. Do NOT merge nodes if they represent:
+                   - Different time periods or dates
+                   - Different numerical values
+                   - Different specific instances of similar things
+                   Example: "Report 2023" and "Report 2024" should remain separate
+
+                Return your response as a JSON array where each element is an array of duplicate nodes.
+                The first node in each array should be the canonical form (the preferred version to keep).
+                Only include nodes that have duplicates - ignore unique nodes.
+                """),
+                HumanMessage(content=f"Analyze these nodes for duplicates:\n{json.dumps(node_data, indent=2)}")
+            ]
+
+            # Get LLM response
+            response = self.cypher_llm.invoke(messages)
+            merge_groups = json.loads(response.content)
+
+            # Merge similar nodes
+            for group in merge_groups:
+                if len(group) > 1:
+                    primary = group[0]
+                    for secondary in group[1:]:
+                        merge_query = """
+                        MATCH (primary {name: $primary_name}), (secondary {name: $secondary_name})
+                        CALL apoc.merge.nodes([primary, secondary]) YIELD node
+                        RETURN node
+                        """
+                        self.neo4j_graph.query(
+                            merge_query,
+                            {"primary_name": primary["name"], "secondary_name": secondary["name"]}
+                        )
+                        logger.info(f"Merged node '{secondary['name']}' into '{primary['name']}'")
+
+        except Exception as e:
+            logger.error(f"Error merging similar nodes: {e}")
+            raise
+
+    def _merge_similar_relationships(self, relationships):
+        """Merge relationships that represent the same connection."""
+        try:
+            # Create a prompt for the LLM to identify similar relationships
+            rel_data = [
+                {
+                    "type": rel["type"],
+                    "start": rel["start_name"],
+                    "end": rel["end_name"],
+                    "properties": rel["properties"]
+                }
+                for rel in relationships
+            ]
+            
+            if not rel_data:
+                return
+
+            messages = [
+                SystemMessage(content="""
+                    Identify relationships that represent the same connection but are written differently.
+                    Return a list of groups where each group contains similar relationships.
+                    The first relationship in each group should be the canonical form to keep.
+                """),
+                HumanMessage(content=f"Analyze these relationships:\n{json.dumps(rel_data, indent=2)}")
+            ]
+
+            # Get LLM response
+            response = self.cypher_llm.invoke(messages)
+            merge_groups = json.loads(response.content)
+
+            # Merge similar relationships
+            for group in merge_groups:
+                if len(group) > 1:
+                    primary = group[0]
+                    for secondary in group[1:]:
+                        merge_query = """
+                        MATCH (s1 {name: $primary_start})-[r1:$primary_type]->(e1 {name: $primary_end}),
+                              (s2 {name: $secondary_start})-[r2:$secondary_type]->(e2 {name: $secondary_end})
+                        CALL apoc.merge.relationships([r1, r2]) YIELD rel
+                        RETURN rel
+                        """
+                        self.neo4j_graph.query(
+                            merge_query,
+                            {
+                                "primary_type": primary["type"],
+                                "primary_start": primary["start"],
+                                "primary_end": primary["end"],
+                                "secondary_type": secondary["type"],
+                                "secondary_start": secondary["start"],
+                                "secondary_end": secondary["end"]
+                            }
+                        )
+                        logger.info(f"Merged relationship '{secondary['type']}' into '{primary['type']}'")
+
+        except Exception as e:
+            logger.error(f"Error merging similar relationships: {e}")
+            raise
 
 
 class VectorDBManager:
@@ -379,10 +592,16 @@ class VectorDBManager:
 
 # Test the code
 def main():
-    prompt_dir = "prompts/level1/agent1"
+    prompt_dir = "Data/prompts_test/level1/agent1"
     name = "agent1"
     gkm = None
-    
+    load_dotenv()
+
+    aura_instance_id = os.getenv('AURA_INSTANCE_ID')
+    aura_instance_name = os.getenv('AURA_INSTANCENAME')
+    neo4j_uri = os.getenv('NEO4J_URI')
+    neo4j_username = os.getenv('NEO4J_USERNAME')
+    neo4j_password = os.getenv('NEO4J_PASSWORD')   
     # Initialize GraphKnowledgeManager
     gkm = GraphKnowledgeManager(
         name=name,
@@ -390,6 +609,11 @@ def main():
         prompt_dir=prompt_dir,
         temperature=0.2,
         max_tokens=4000,
+        aura_instance_id=aura_instance_id,
+        aura_instance_name=aura_instance_name,
+        neo4j_uri=neo4j_uri,
+        neo4j_username=neo4j_username,
+        neo4j_password=neo4j_password,  
     )
     
     # Populate the knowledge graph with insights
@@ -410,3 +634,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

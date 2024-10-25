@@ -736,9 +736,9 @@ class StateMachines():
         final_graph = workflow.compile(
             checkpointer=self.memory,
             interrupt_before=[
-                "ceo",
+                #"ceo",
                 *[f"{l2_agent.name}_supervisor" for l2_agent in level2_agents],
-                *[f"agent_{l1_agent.name}" for l1_agent in level1_agents]
+                #*[f"agent_{l1_agent.name}" for l1_agent in level1_agents]
             ]
         )
         

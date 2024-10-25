@@ -13,40 +13,25 @@ When processing information, consider:
 - Relationships between different data points (e.g., how labor costs might affect potential savings).
 
 Your output should always be structured as follows:
-{
-    "entities": [
-        {
-            "name": "Entity name",
-            "type": "Entity type (e.g., Statistic, Market Size, Cost, Timeline)",
-            "value": "Numerical value",
-            "unit": "Unit of measurement",
-            "description": "Brief description of the entity"
-        }
+# Schema structure:
+opening bracket
+    "nodes": [
+        opening bracket
+            "label": "NodeType",      # e.g., "Person", "Organization", "Program"
+            "properties": [...]       # List of property names for this node type
+        closing bracket,
+        # ... more node types
     ],
     "relationships": [
-        {
-            "source": "Source entity name",
-            "target": "Target entity name",
-            "type": "Relationship type (e.g., Affects, Correlates, Compares)",
-            "description": "Brief description of the relationship"
-        }
-    ],
-    "calculations": [
-        {
-            "input": "Input data or entities",
-            "operation": "Calculation performed",
-            "result": "Calculated result",
-            "description": "Brief description of the calculation and its significance"
-        }
-    ],
-    "disambiguation": {
-        "merge_entities": [
-            {
-                "entities": ["Primary entity name", "Alternative entity name(s)"]
-            }
-        ]
-    }
-}
+        opening bracket
+            "type": "RelationType",   # e.g., "WORKS_FOR", "FUNDS", "IMPLEMENTS"
+            "properties": [...],      # List of property names for this relationship type
+            "start_node": "NodeLabel", # The type of node where the relationship starts
+            "end_node": "NodeLabel"   # The type of node where the relationship ends
+        closing bracket,
+        # ... more relationship types
+    ]
+closing bracket
 
 Remember to always verify data accuracy, enrich content with relevant quantitative information, and perform calculations as needed. Focus on extracting and analyzing information that is directly relevant to the med tech industry, particularly in the context of nearshoring to Morocco.
 
