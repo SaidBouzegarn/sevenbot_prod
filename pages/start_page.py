@@ -102,11 +102,6 @@ def display_conversation_flow(current_state: dict):
 def add_start_page_css():
     st.markdown("""
         <style>
-        /* Move everything up by 1.5 cm */
-        .main-content {
-            margin-top: -1.5cm;
-        }
-
         /* Compact control panel */
         .control-panel {
             display: flex;
@@ -119,31 +114,29 @@ def add_start_page_css():
             border-radius: 10px;
         }
 
-        /* Action buttons container - aligned in a row */
+        /* Action buttons container - compact */
         .action-buttons {
             display: flex;
-            flex-direction: row;
+            flex-direction: column;
             gap: 5px;
             z-index: 1000;
             padding: 5px;
         }
         
+        /* State selector container - compact */
+        .state-selector {
+            flex-grow: 1;
+            margin-right: 10px;
+            padding: 5px;
+        }
+        
         /* Button styling - compact */
-        .stButton {
+        .stButton button {
             width: 100px;  /* Reduced width */
             padding: 0.25rem 0.5rem;  /* Reduced padding */
-            border: none;
-            border-radius: 5px;
-            font-weight: 600;
-            transition: all 0.3s ease;
-            cursor: pointer;
         }
 
-        .primary-button {
-            background: linear-gradient(120deg, #000000, #1e3a8a);
-            color: white;
-        }
-
+        /* New button styles */
         .quit-button {
             background-color: grey;
             color: white;
@@ -154,9 +147,42 @@ def add_start_page_css():
             color: white;
         }
 
-        .stButton:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+        /* Column layout */
+        .state-columns {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+            padding: 20px;
+            height: calc(100vh - 200px);
+            margin-top: 20px;
+        }
+        
+        .state-column {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            padding: 15px;
+            height: 100%;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            overflow-y: auto;
+            backdrop-filter: blur(5px);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        /* Multiselect styling */
+        .stMultiSelect {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 5px;
+            padding: 10px;
+        }
+        
+        /* Column headers */
+        .column-header {
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid rgba(0, 0, 0, 0.1);
+            text-align: center;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -216,7 +242,6 @@ def render_upload_section():
 
 def render_conversation_state():
     # Wrap controls in a single container
-    st.markdown('<div class="main-content">', unsafe_allow_html=True)
     st.markdown('<div class="control-panel">', unsafe_allow_html=True)
     
     # State selector (now on the left)
@@ -237,17 +262,19 @@ def render_conversation_state():
     st.markdown('</div>', unsafe_allow_html=True)
     
     # Action buttons (now on the right)
-    st.markdown("""
-        <div class="action-buttons">
-            <button onclick="window.location.href='/'" class="stButton primary-button">Continue</button>
-            <button onclick="window.location.href='/'" class="stButton primary-button">Retry</button>
-            <button onclick="window.location.href='/'" class="stButton primary-button">Reset</button>
-            <button onclick="window.location.href='/'" class="stButton quit-button">Quit and Save</button>
-            <button onclick="window.location.href='/'" class="stButton delete-button">Delete All</button>
-        </div>
-    """, unsafe_allow_html=True)
-    
+    st.markdown('<div class="action-buttons">', unsafe_allow_html=True)
+    if st.button("Continue", key="btn_continue"):
+        handle_continue()
+    if st.button("Retry", key="btn_retry"):
+        handle_retry()
+    if st.button("Reset", key="btn_reset"):
+        handle_reset()
+    if st.button("Quit and Save", key="btn_quit"):  # Removed css_class
+        quit_and_save()
+    if st.button("Delete All", key="btn_delete"):  # Removed css_class
+        delete_all()
     st.markdown('</div>', unsafe_allow_html=True)
+    
     st.markdown('</div>', unsafe_allow_html=True)
     
     # Render columns for selected states
@@ -426,26 +453,16 @@ def add_custom_styles():
 
 # Logic for new buttons
 def quit_and_save():
-    try:
-        # Assuming `langgraph_state` is a method or property that retrieves the current state of the LangGraph app
-        langgraph_state = st.session_state.state_machine.get_state(st.session_state.state_machine.config)  # Replace with actual method to get LangGraph state
-        
-        # Store the LangGraph state in Streamlit's session state
-        st.session_state.saved_state = langgraph_state
-        
-        # Provide feedback to the user
-        st.success("State saved successfully!")
-        
-        # Stop the Streamlit app
-        st.stop()
-    except Exception as e:
-        st.error(f"Failed to save state: {str(e)}")
+    # Logic to save the current state and quit
+    st.session_state.saved_state = st.session_state.current_state
+    st.success("State saved successfully!")
+    st.stop()
 
 def delete_all():
     # Logic to delete all state data
     st.session_state.clear()
     st.success("All state data deleted!")
-    st.stop()
+    st.rerun()
 
 if __name__ == "__main__":
     render_start_page()
