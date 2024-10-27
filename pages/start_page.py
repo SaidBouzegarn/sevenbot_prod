@@ -40,6 +40,7 @@ def read_pdf(uploaded_file) -> str:
         return text
     except Exception as e:
         st.error(f"Error reading PDF: {str(e)}")
+        st.error(f"Full traceback:\n{traceback.format_exc()}")
         return ""
 
 def preserve_message_type(message: Union[str, dict, HumanMessage, AIMessage, SystemMessage]) -> Union[HumanMessage, AIMessage, SystemMessage]:
@@ -137,6 +138,7 @@ def render_start_page():
                     st.success("File processed successfully!")
             except Exception as e:
                 st.error(f"Error processing file: {str(e)}")
+                st.error(f"Full traceback:\n{traceback.format_exc()}")
                 st.session_state.file_content = ""
         
         news = st.text_area(
@@ -179,6 +181,7 @@ def render_start_page():
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error starting conversation: {str(e)}")
+                    st.error(f"Full traceback:\n{traceback.format_exc()}")
     
     else:
         st.subheader("Current Conversation State")
@@ -221,25 +224,57 @@ def render_start_page():
             if st.button("Continue"):
                 with st.spinner("Processing next step..."):
                     try:
+                        # Add logging before state machine call
+                        logger.info("Attempting to resume state machine with edited state:")
+                        logger.info(f"Edited state: {edited_state}")
+                        
                         result = st.session_state.state_machine.resume(edited_state)
+                        
+                        # Add validation for result
+                        if result is None:
+                            st.error("State machine returned None. The conversation may have reached an end state or encountered an error.")
+                            logger.error("State machine returned None result")
+                            return
+                            
                         st.session_state.current_state = result
                         st.success("Step completed successfully!")
+                        logger.info("State machine step completed successfully")
                         time.sleep(1)
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Error processing step: {str(e)}")
+                        error_msg = f"Error processing step: {str(e)}"
+                        logger.error(error_msg)
+                        logger.error(f"Full traceback:\n{traceback.format_exc()}")
+                        st.error(error_msg)
+                        st.error(f"Full traceback:\n{traceback.format_exc()}")
         
         with col2:
             if st.button("Retry"):
                 with st.spinner("Retrying last step..."):
                     try:
+                        # Add logging before retry
+                        logger.info("Attempting to retry state machine with current state:")
+                        logger.info(f"Current state: {st.session_state.current_state}")
+                        
                         result = st.session_state.state_machine.resume(st.session_state.current_state)
+                        
+                        # Add validation for result
+                        if result is None:
+                            st.error("State machine returned None. The conversation may have reached an end state or encountered an error.")
+                            logger.error("State machine returned None result during retry")
+                            return
+                            
                         st.session_state.current_state = result
                         st.success("Step retried successfully!")
+                        logger.info("State machine retry completed successfully")
                         time.sleep(1)
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Error retrying step: {str(e)}")
+                        error_msg = f"Error retrying step: {str(e)}"
+                        logger.error(error_msg)
+                        logger.error(f"Full traceback:\n{traceback.format_exc()}")
+                        st.error(error_msg)
+                        st.error(f"Full traceback:\n{traceback.format_exc()}")
         
         with col3:
             if st.button("Reset Conversation"):

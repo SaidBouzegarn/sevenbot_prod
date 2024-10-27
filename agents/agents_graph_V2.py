@@ -88,7 +88,7 @@ trimmer = trim_messages(strategy="last", max_tokens=5000, token_counter=ChatOpen
 class Level1Agent(BaseAgent):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.supervisor_name = kwargs.get('supervisor_name', None)
+        self.supervisor_name = kwargs.get('supervisor_name')
 
         self.state_schema = self._create_dynamic_state_schema()
         self.attr_mapping = self._create_attr_mapping()
@@ -366,12 +366,14 @@ class Level2Agent(BaseAgent):
 
 
     def should_continue(self, state) -> Literal["aggregate_for_ceo", "break_down_for_executives"]:
-        try:
-            current_mode = self.get_attr(state, "mode")[-1] if self.get_attr(state, "mode") else "break_down_for_executives"
-            if current_mode == "aggregate_for_ceo" :
-                return "aggregate_for_ceo"
-        except Exception as e:
+        current_mode = self.get_attr(state, "mode")
+        if len(current_mode) < 1:
             return "break_down_for_executives"
+        else:
+            if current_mode[-1] == "aggregate_for_ceo" :
+                return "aggregate_for_ceo"
+            else:
+                return "break_down_for_executives"
 
 
     def _create_dynamic_state_schema(self):
@@ -595,7 +597,6 @@ class StateMachines():
                     content="Starting executive briefing with CEO. Executives will share departmental insights and receive strategic direction."
                 )])
             ),
-
             "ceo_messages": (
                 Annotated[List, add_messages], 
                 Field(default_factory=lambda: [HumanMessage(
@@ -608,34 +609,65 @@ class StateMachines():
                     content="Starting CEO advisory session. Ready to assist with market research, data analysis, and strategic insights compilation."
                 )])
             ),
-            "ceo_mode": (Annotated[List[Literal["research_information", "write_to_digest", "communicate_with_directors", "communicate_with_executives", "end"]], operator.add], Field(default_factory=lambda: ["research_information"])),
-            "company_knowledge": (Annotated[List[str], operator.add], Field(default_factory=lambda: [])),
-            "news_insights": (Annotated[List[str], operator.add], Field(default_factory=lambda: [])),
-            "digest": (Annotated[List[str], operator.add], Field(default_factory=lambda: [])),
-            "ceo_runs_counter": (Annotated[int, operator.add], Field(default=0))
+            "ceo_mode": (
+                Annotated[List[Literal["research_information", "write_to_digest", "communicate_with_directors", "communicate_with_executives", "end"]], operator.add],
+                Field(default_factory=lambda: ["research_information"])
+            ),
+            "company_knowledge": (
+                Annotated[List[str], operator.add],
+                Field(default_factory=list)
+            ),
+            "news_insights": (
+                Annotated[List[str], operator.add],
+                Field(default_factory=list)
+            ),
+            "digest": (
+                Annotated[List[str], operator.add],
+                Field(default_factory=list)
+            ),
+            "ceo_runs_counter": (
+                Annotated[int, operator.add],
+                Field(default=0)
+            )
         }
 
         # Add default modes for all agents
         for agent in level1_agents:
-            unified_fields[f"{agent.name}_mode"] = (Annotated[List[Literal["research", "converse"]], operator.add], Field(default_factory=lambda: ["research"]))
+            unified_fields[f"{agent.name}_mode"] = (
+                Annotated[List[Literal["research", "converse"]], operator.add],
+                Field(default_factory=lambda: ["research"])
+            )
             unified_fields[f"{agent.name}_assistant_conversation"] = (
-                Annotated[List, add_messages], 
+                Annotated[List, add_messages],
                 Field(default_factory=lambda: [HumanMessage(
                     content=f"Starting research session for {agent.name}. Ready to assist with information gathering and analysis to support executive decision-making."
                 )])
             )
-            unified_fields[f"{agent.name}_messages"] = (Annotated[List, add_messages], Field(default_factory=lambda: [HumanMessage(content="")]))
-            unified_fields[f"{agent.name}_domain_knowledge"] = (Annotated[List[str], operator.add], Field(default_factory=lambda: []))
+            unified_fields[f"{agent.name}_messages"] = (
+                Annotated[List, add_messages],
+                Field(default_factory=lambda: [HumanMessage(content="")])
+            )
+            unified_fields[f"{agent.name}_domain_knowledge"] = (
+                Annotated[List[str], operator.add],
+                Field(default_factory=list)
+            )
 
         for agent in level2_agents:
-            unified_fields[f"{agent.name}_mode"] = (Annotated[List[Literal["aggregate_for_ceo", "break_down_for_executives"]], operator.add], Field(default_factory=lambda: ["break_down_for_executives"]))
-            unified_fields[f"{agent.name}_messages"] = (Annotated[List, add_messages], Field(default_factory=lambda: [HumanMessage(content="")]))
+            unified_fields[f"{agent.name}_mode"] = (
+                Annotated[List[Literal["aggregate_for_ceo", "break_down_for_executives"]], operator.add],
+                Field(default_factory=lambda: ["break_down_for_executives"])
+            )
+            unified_fields[f"{agent.name}_messages"] = (
+                Annotated[List, add_messages],
+                Field(default_factory=lambda: [HumanMessage(content="")])
+            )
             unified_fields[f"{agent.name}_level1_2_conversation"] = (
-                Annotated[List, add_messages], 
+                Annotated[List, add_messages],
                 Field(default_factory=lambda: [HumanMessage(
                     content=f"Starting departmental coordination meeting. Executives will report to their directors {agent.name} for guidance and alignment."
                 )])
-            ),
+            )
+
         UnifiedState = create_model("UnifiedState", **unified_fields, __base__=BaseModel)
         return UnifiedState
 
@@ -712,17 +744,17 @@ class StateMachines():
 
         def create_ceo_router_up(level2_agents):
             def ceo_router_up(state):
-                return "complete" if all([getattr(state, f"{l2_agent.name}_mode")[-1] == "aggregate_for_ceo" for l2_agent in level2_agents]) else None
+                return "complete" if all([getattr(state, f"{l2_agent.name}_mode")[-1] == "aggregate_for_ceo" for l2_agent in level2_agents]) else "continue"
             return ceo_router_up
         
         def ceo_router_up_node(state):
-            return None
+            return state
         
         workflow.add_node("ceo_router_up", ceo_router_up_node)
         
         def ceo_router_down(state):
             # This function will be called when the router node is executed
-            return None
+            return state
 
         workflow.add_node("ceo_router_down" , ceo_router_down  )
 
@@ -737,7 +769,7 @@ class StateMachines():
             # Add Level 2 agent node
             workflow.add_node(f"{l2_agent.name}_supervisor", l2_agent.level2_supervisor_node)
 
-        workflow.add_node("END", lambda state: {})
+        workflow.add_node("END", lambda state: state)
         # Add conditional edges based on the should_continue function
         workflow.add_conditional_edges(
             "ceo",
@@ -772,7 +804,7 @@ class StateMachines():
 
             def create_level2_router_down(agent_name):
                 def level2_router(state):
-                    return None
+                    return state
                 level2_router.__name__ = f"{agent_name}_router_down"
                 return level2_router
         
@@ -785,13 +817,13 @@ class StateMachines():
             def create_level2_router_up(agent_name, subordinates):
                 def level2_router(state):
                     return "complete" if all([getattr(state, f"{sub}_mode")[-1] == "converse" 
-                                              for sub in subordinates]) else None
+                                              for sub in subordinates]) else "continue"
                 level2_router.__name__ = f"{agent_name}_router_up"
                 return level2_router
             
             def create_level2_router_up_node(agent_name):
                 def level2_router_node(state):
-                    return None
+                    return state
                 level2_router_node.__name__ = f"{agent_name}_router_up"
                 return level2_router_node
 
@@ -806,10 +838,10 @@ class StateMachines():
                     workflow.add_conditional_edges(
                     f"agent_{l1_agent.name}",
                     #lambda s: "assistant" if l1_agent.get_attr(s, "mode")[-1] == "research" else "router",
-                    lambda state: "assistant" if l1_agent.get_attr(state, "mode")[-1] == "research" else "router",
+                    lambda state: l1_agent.get_attr(state, "mode")[-1] if l1_agent.get_attr(state, "mode") else "converse",
                         {
-                            "assistant" : f"assistant_{l1_agent.name}",
-                            "router": router_name_up
+                            "research" : f"assistant_{l1_agent.name}",
+                            "converse": router_name_up
                         }
                     )
                     workflow.add_conditional_edges(f"assistant_{l1_agent.name}", l1_agent.should_continue,
@@ -828,7 +860,7 @@ class StateMachines():
                 router_function_up,
                 {
                     "complete": f"{l2_agent.name}_supervisor",
-                    None: router_name_up  # Loop back if not all subordinates are ready
+                    "continue": router_name_up  # Loop back if not all subordinates are ready
                 }
             )
             workflow.add_conditional_edges(
@@ -847,7 +879,7 @@ class StateMachines():
             create_ceo_router_up(level2_agents),
             {
                 "complete": "ceo",
-                None: "ceo_router_up"  # Loop back if not all subordinates are ready
+                "continue": "ceo_router_up"  # Loop back if not all subordinates are ready
             }
         )
 
@@ -858,7 +890,7 @@ class StateMachines():
             interrupt_before=[
                 #"ceo",
                 *[f"{l2_agent.name}_supervisor" for l2_agent in level2_agents],
-                #*[f"agent_{l1_agent.name}" for l1_agent in level1_agents]
+                *[f"agent_{l1_agent.name}" for l1_agent in level1_agents]
             ]
         )
         
@@ -954,6 +986,7 @@ if __name__ == "__main__":
         result = state_machines.resume(new_values)
 
     logger.info("Graph execution completed.")
+
 
 
 
