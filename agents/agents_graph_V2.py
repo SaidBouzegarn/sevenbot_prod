@@ -58,7 +58,7 @@ load_dotenv()
 
 recursion_limit = os.getenv("RECURSION_LIMIT", 15)
 
-set_llm_cache(InMemoryCache())
+#set_llm_cache(InMemoryCache())
 
 def pydantic_to_json(pydantic_obj):
     # Convert to dictionary and then to a compact JSON string
