@@ -8,5 +8,6 @@
   "assistant_llm_config": {
     "temperature": 0.4,
     "max_tokens": 300
-  }
+  },
+  "supervisor_name": "supervisor2"
 }
