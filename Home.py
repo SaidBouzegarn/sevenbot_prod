@@ -13,7 +13,7 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent
 
 # Add this near the top of your file, after imports
-DEBUG_MODE = True  # Set to False to enable authentication
+DEBUG_MODE = False  # Set to False to enable authentication
 
 # Add CSS for the stylish landing page
 def add_custom_css():
@@ -35,25 +35,42 @@ def add_custom_css():
             font-family: 'Arial Black', sans-serif;
             font-size: 4.5rem;
             font-weight: 900;
-            background: linear-gradient(120deg, #000000, #1e3a8a);
+            background: linear-gradient(120deg, 
+                rgba(0, 0, 0, 1),  /* Pure black */
+                rgba(30, 58, 138, 1)  /* Pure deep blue */
+            );
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             margin-bottom: 0.5rem;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);  /* Subtle shadow for depth */
         }
         
         /* Form container styling */
         [data-testid="stForm"] {
             max-width: 400px;
             padding: 2rem;
-            background: rgba(255, 255, 255, 0.05);
+            background: rgba(255, 255, 255, 0.15);  /* More visible white background */
             border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);  /* Stronger shadow */
+            border: 1px solid rgba(0, 0, 0, 0.1);  /* Subtle border */
         }
         
         /* Submit button styling */
         [data-testid="stForm"] button {
-            background: linear-gradient(120deg, #000000, #1e3a8a);
+            background: linear-gradient(120deg, 
+                rgba(0, 0, 0, 1),  /* Pure black */
+                rgba(30, 58, 138, 1)  /* Pure deep blue */
+            );
             width: 100%;
+            color: white !important;  /* Ensure text is white */
+            font-weight: 600;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);  /* Button shadow */
+        }
+
+        /* Input field styling */
+        [data-testid="stForm"] input {
+            border: 1px solid rgba(0, 0, 0, 0.2);
+            background: rgba(255, 255, 255, 0.9);  /* Nearly white background */
         }
         </style>
     """, unsafe_allow_html=True)
@@ -64,8 +81,6 @@ def check_password():
         st.session_state["password_correct"] = True
         return True
         
-    """Returns `True` if the user had a correct password."""
-
     def login_form():
         """Form with widgets to collect user information"""
         # Add the title before the form
