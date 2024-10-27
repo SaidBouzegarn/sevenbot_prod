@@ -99,187 +99,353 @@ def display_conversation_flow(current_state: dict):
         
         st.markdown("---")  # Add a separator between sections
 
+def add_start_page_css():
+    st.markdown("""
+        <style>
+        /* Move everything up by 1.5 cm */
+        .main-content {
+            margin-top: -1.5cm;
+        }
+
+        /* Compact control panel */
+        .control-panel {
+            display: flex;
+            flex-direction: row;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            margin-bottom: 10px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+        }
+
+        /* Action buttons container - aligned in a row */
+        .action-buttons {
+            display: flex;
+            flex-direction: row;
+            gap: 5px;
+            z-index: 1000;
+            padding: 5px;
+        }
+        
+        /* Button styling - compact */
+        .stButton {
+            width: 100px;  /* Reduced width */
+            padding: 0.25rem 0.5rem;  /* Reduced padding */
+            border: none;
+            border-radius: 5px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .primary-button {
+            background: linear-gradient(120deg, #000000, #1e3a8a);
+            color: white;
+        }
+
+        .quit-button {
+            background-color: grey;
+            color: white;
+        }
+        
+        .delete-button {
+            background-color: red;
+            color: white;
+        }
+
+        .stButton:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+def render_logo():
+    st.markdown("""
+        <div class="logo-container">
+            <div class="logo-text">
+                SEVEN<span style="font-family: 'Roboto'; transform: rotate(90deg); display: inline-block;">🤖</span>OTS
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
 def render_start_page():
-    st.title("7bot DAssist Interaction")
+    # Add all styles
+    add_start_page_css()
+    add_custom_styles()
     
+    # Add logo
+    render_logo()
+    
+    # Initialize state machine if needed
     if "state_machine" not in st.session_state or st.session_state.state_machine is None:
-        with st.spinner("Initializing state machine..."):
+        initialize_state_machine()
+    
+    if st.session_state.state_machine is None:
+        st.error("State machine is not initialized. Please check the logs.")
+        return
+
+    # Render appropriate view based on conversation state
+    if not st.session_state.get("conversation_started", False):
+        render_upload_section()
+    else:
+        render_conversation_state()
+
+def render_upload_section():
+    st.markdown('<div class="upload-container">', unsafe_allow_html=True)
+    
+    uploaded_file = st.file_uploader("Upload your documents", type=['txt', 'pdf'])
+    if uploaded_file:
+        try:
+            with st.spinner("Processing file..."):
+                if uploaded_file.type == "application/pdf":
+                    content = read_pdf(uploaded_file)
+                else:
+                    content = uploaded_file.read().decode('utf-8')
+                st.session_state.file_content = content
+                st.success("File processed successfully!")
+                
+                # Show the Start button only after successful upload
+                if st.button("Start Conversation", use_container_width=True):
+                    initialize_conversation(content)
+        except Exception as e:
+            handle_error("Error processing file", e)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+
+def render_conversation_state():
+    # Wrap controls in a single container
+    st.markdown('<div class="main-content">', unsafe_allow_html=True)
+    st.markdown('<div class="control-panel">', unsafe_allow_html=True)
+    
+    # State selector (now on the left)
+    st.markdown('<div class="state-selector">', unsafe_allow_html=True)
+    available_states = list(st.session_state.current_state.keys())
+    if 'selected_states' not in st.session_state:
+        st.session_state.selected_states = available_states[:4]
+    
+    selected_states = st.multiselect(
+        "Select state elements to display (max 4)",
+        available_states,
+        default=st.session_state.selected_states,
+        max_selections=4
+    )
+    
+    if len(selected_states) <= 4:
+        st.session_state.selected_states = selected_states
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Action buttons (now on the right)
+    st.markdown("""
+        <div class="action-buttons">
+            <button onclick="window.location.href='/'" class="stButton primary-button">Continue</button>
+            <button onclick="window.location.href='/'" class="stButton primary-button">Retry</button>
+            <button onclick="window.location.href='/'" class="stButton primary-button">Reset</button>
+            <button onclick="window.location.href='/'" class="stButton quit-button">Quit and Save</button>
+            <button onclick="window.location.href='/'" class="stButton delete-button">Delete All</button>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Render columns for selected states
+    if selected_states:
+        cols = st.columns(4)
+        for i, col in enumerate(cols):
+            with col:
+                if i < len(selected_states):
+                    state_key = selected_states[i]
+                    st.markdown(f'<div class="column-header">{state_key}</div>', 
+                              unsafe_allow_html=True)
+                    render_conversation_messages(state_key)
+
+def render_conversation_messages(key):
+    if key in st.session_state.current_state:
+        messages = st.session_state.current_state[key]
+        for i, msg in enumerate(messages):
+            content = msg.content if hasattr(msg, 'content') else str(msg)
+            edited = st.text_area(
+                f"{type(msg).__name__ if hasattr(msg, '__class__') else 'Message'} {i+1}",
+                content,
+                key=f"{key}_{i}",
+                height=150
+            )
+            # Store edited content back to state
+            if edited != content:
+                st.session_state.current_state[key][i] = preserve_message_type(edited)
+
+# Helper functions for state management and error handling
+def initialize_state_machine():
+    with st.spinner("Initializing state machine..."):
+        try:
             base_dir = Path(__file__).resolve().parent.parent
-            #prompts_dir = os.path.join(base_dir, "Data", "Prompts")
             prompts_dir = os.path.join("Data", "Prompts")
             logger.info(f"Attempting to initialize StateMachines with prompts_dir: {prompts_dir}")
             st.session_state.state_machine = StateMachines(str(prompts_dir).strip())
             logger.info("State machine initialized successfully!")
             st.success("State machine initialized successfully!")
+        except Exception as e:
+            handle_error("Failed to initialize state machine", e)
 
-    
-    if st.session_state.state_machine is None:
-        st.error("State machine is not initialized. Please check the logs for detailed error information.")
-        return
+def initialize_conversation(content):
+    with st.spinner("Initializing conversation..."):
+        try:
+            initial_state = {
+                "news_insights": [content],
+                "digest": [""],
+                "ceo_messages": [],
+                "ceo_mode": ["research_information"]
+            }
+            
+            result = st.session_state.state_machine.start(initial_state)
+            if result is None:
+                st.error("State machine returned None. Please check the implementation.")
+                return
+            
+            st.session_state.current_state = result
+            st.session_state.conversation_started = True
+            st.success("Conversation started successfully!")
+            time.sleep(1)
+            st.rerun()
+        except Exception as e:
+            handle_error("Error starting conversation", e)
 
-    if "conversation_started" not in st.session_state:
-        st.session_state.conversation_started = False
-        
-    if "current_state" not in st.session_state:
-        st.session_state.current_state = None
-    
-    if not st.session_state.conversation_started:
-        st.subheader("Initial State Configuration")
-        
-        uploaded_file = st.file_uploader("Upload a file", type=['txt', 'pdf'])
-        if uploaded_file:
-            try:
-                with st.spinner("Processing file..."):
-                    if uploaded_file.type == "application/pdf":
-                        content = read_pdf(uploaded_file)
-                    else:
-                        content = uploaded_file.read().decode('utf-8')
-                    st.session_state.file_content = content
-                    st.success("File processed successfully!")
-            except Exception as e:
-                st.error(f"Error processing file: {str(e)}")
-                st.error(f"Full traceback:\n{traceback.format_exc()}")
-                st.session_state.file_content = ""
-        
-        news = st.text_area(
-            "News content", 
-            value=st.session_state.get('file_content', ''),
-            height=200
-        )
-        
-        digest = st.text_area(
-            "Initial digest", 
-            value="",
-            height=200
-        )
-        
-        ceo_message = st.text_area(
-            "CEO initial message",
-            value="",
-            height=100
-        )
-        
-        if st.button("Start Conversation"):
-            with st.spinner("Initializing conversation..."):
-                try:
-                    initial_state = {
-                        "news_insights": [news],
-                        "digest": [digest],
-                        "ceo_messages": [HumanMessage(content=ceo_message)] if ceo_message else [],
-                        "ceo_mode": ["research_information"]
-                    }
-                    
-                    result = st.session_state.state_machine.start(initial_state)
-                    if result is None:
-                        st.error("State machine returned None. Please check the StateMachines implementation.")
-                        return
-                    
-                    st.session_state.current_state = result
-                    st.session_state.conversation_started = True
-                    st.success("Conversation started successfully!")
-                    time.sleep(1)
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error starting conversation: {str(e)}")
-                    st.error(f"Full traceback:\n{traceback.format_exc()}")
-    
-    else:
-        st.subheader("Current Conversation State")
-        
-        display_conversation_flow(st.session_state.current_state)
-        
-        tabs = st.tabs(["Level 1-2", "Level 1-3", "Level 2-3", "Assistant", "CEO Messages"])
-        
-        conversations = {
-            "level1_2_conversation": "Level 1-2 Conversation",
-            "level1_3_conversation": "Level 1-3 Conversation",
-            "level2_3_conversation": "Level 2-3 Conversation",
-            "ceo_assistant_conversation": "Assistant Conversation",
-            "ceo_messages": "CEO Messages"
+def handle_continue():
+    with st.spinner("Processing next step..."):
+        try:
+            logger.info("Attempting to resume state machine with current state")
+            result = st.session_state.state_machine.resume(st.session_state.current_state)
+            
+            if result is None:
+                st.error("State machine returned None. The conversation may have ended.")
+                logger.error("State machine returned None result")
+                return
+                
+            st.session_state.current_state = result
+            st.success("Step completed successfully!")
+            logger.info("State machine step completed successfully")
+            time.sleep(1)
+            st.rerun()
+        except Exception as e:
+            handle_error("Error processing step", e)
+
+def handle_retry():
+    with st.spinner("Retrying last step..."):
+        try:
+            logger.info("Attempting to retry state machine with current state")
+            result = st.session_state.state_machine.resume(st.session_state.current_state)
+            
+            if result is None:
+                st.error("State machine returned None. The conversation may have ended.")
+                logger.error("State machine returned None result during retry")
+                return
+                
+            st.session_state.current_state = result
+            st.success("Step retried successfully!")
+            logger.info("State machine retry completed successfully")
+            time.sleep(1)
+            st.rerun()
+        except Exception as e:
+            handle_error("Error retrying step", e)
+
+def handle_reset():
+    if st.button("Confirm Reset", key="confirm_reset"):
+        st.session_state.clear()
+        st.rerun()
+
+def handle_error(message: str, error: Exception):
+    error_msg = f"{message}: {str(error)}"
+    logger.error(error_msg)
+    logger.error(f"Full traceback:\n{traceback.format_exc()}")
+    st.error(error_msg)
+    st.error(f"Full traceback:\n{traceback.format_exc()}")
+
+# Additional styling elements
+def add_custom_styles():
+    st.markdown("""
+        <style>
+        /* Message box styling */
+        .stTextArea textarea {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            border-radius: 5px;
+            font-size: 0.9rem;
+            resize: vertical;
         }
         
-        edited_state = st.session_state.current_state.copy()
+        /* Button styling */
+        .stButton button {
+            background: linear-gradient(120deg, #000000, #1e3a8a);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 5px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            width: 200px;
+            text-align: center;
+        }
         
-        for i, (key, title) in enumerate(conversations.items()):
-            with tabs[i]:
-                if key in st.session_state.current_state:
-                    messages = st.session_state.current_state[key]
-                    edited_messages = []
-                    
-                    for j, msg in enumerate(messages):
-                        content = msg.content if hasattr(msg, 'content') else str(msg)
-                        message_type = type(msg).__name__ if hasattr(msg, '__class__') else "Message"
-                        edited_content = st.text_area(
-                            f"{message_type} {j+1}",
-                            content,
-                            key=f"{key}_{j}"
-                        )
-                        edited_messages.append(preserve_message_type(msg))
-                    
-                    edited_state[key] = edited_messages
+        .stButton button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+        }
         
-        col1, col2, col3 = st.columns(3)
+        /* Multiselect styling */
+        .stMultiSelect > div {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 5px;
+        }
         
-        with col1:
-            if st.button("Continue"):
-                with st.spinner("Processing next step..."):
-                    try:
-                        # Add logging before state machine call
-                        logger.info("Attempting to resume state machine with edited state:")
-                        logger.info(f"Edited state: {edited_state}")
-                        
-                        result = st.session_state.state_machine.resume(edited_state)
-                        
-                        # Add validation for result
-                        if result is None:
-                            st.error("State machine returned None. The conversation may have reached an end state or encountered an error.")
-                            logger.error("State machine returned None result")
-                            return
-                            
-                        st.session_state.current_state = result
-                        st.success("Step completed successfully!")
-                        logger.info("State machine step completed successfully")
-                        time.sleep(1)
-                        st.rerun()
-                    except Exception as e:
-                        error_msg = f"Error processing step: {str(e)}"
-                        logger.error(error_msg)
-                        logger.error(f"Full traceback:\n{traceback.format_exc()}")
-                        st.error(error_msg)
-                        st.error(f"Full traceback:\n{traceback.format_exc()}")
+        .stMultiSelect [data-baseweb="tag"] {
+            background: linear-gradient(120deg, #000000, #1e3a8a);
+            color: white;
+        }
         
-        with col2:
-            if st.button("Retry"):
-                with st.spinner("Retrying last step..."):
-                    try:
-                        # Add logging before retry
-                        logger.info("Attempting to retry state machine with current state:")
-                        logger.info(f"Current state: {st.session_state.current_state}")
-                        
-                        result = st.session_state.state_machine.resume(st.session_state.current_state)
-                        
-                        # Add validation for result
-                        if result is None:
-                            st.error("State machine returned None. The conversation may have reached an end state or encountered an error.")
-                            logger.error("State machine returned None result during retry")
-                            return
-                            
-                        st.session_state.current_state = result
-                        st.success("Step retried successfully!")
-                        logger.info("State machine retry completed successfully")
-                        time.sleep(1)
-                        st.rerun()
-                    except Exception as e:
-                        error_msg = f"Error retrying step: {str(e)}"
-                        logger.error(error_msg)
-                        logger.error(f"Full traceback:\n{traceback.format_exc()}")
-                        st.error(error_msg)
-                        st.error(f"Full traceback:\n{traceback.format_exc()}")
+        /* Success/Error message styling */
+        .stSuccess, .stError {
+            padding: 1rem;
+            border-radius: 5px;
+            margin: 1rem 0;
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(5px);
+        }
         
-        with col3:
-            if st.button("Reset Conversation"):
-                st.session_state.clear()
-                st.rerun()
+        /* Hide default Streamlit elements */
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        
+        /* Spinner styling */
+        .stSpinner > div {
+            border-top-color: #1e3a8a !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+# Logic for new buttons
+def quit_and_save():
+    try:
+        # Assuming `langgraph_state` is a method or property that retrieves the current state of the LangGraph app
+        langgraph_state = st.session_state.state_machine.get_state(st.session_state.state_machine.config)  # Replace with actual method to get LangGraph state
+        
+        # Store the LangGraph state in Streamlit's session state
+        st.session_state.saved_state = langgraph_state
+        
+        # Provide feedback to the user
+        st.success("State saved successfully!")
+        
+        # Stop the Streamlit app
+        st.stop()
+    except Exception as e:
+        st.error(f"Failed to save state: {str(e)}")
+
+def delete_all():
+    # Logic to delete all state data
+    st.session_state.clear()
+    st.success("All state data deleted!")
+    st.stop()
 
 if __name__ == "__main__":
     render_start_page()

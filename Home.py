@@ -13,7 +13,7 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent
 
 # Add this near the top of your file, after imports
-DEBUG_MODE = False  # Set to False to enable authentication
+DEBUG_MODE = True  # Set to False to enable authentication
 
 # Add CSS for the stylish landing page
 def add_custom_css():
@@ -126,33 +126,15 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Initialize session state
-if 'page' not in st.session_state:
-    st.session_state.page = "Home"
+# Initialize session state (simplified)
+if 'state_machine' not in st.session_state:
     st.session_state.state_machine = None
     st.session_state.base_dir = BASE_DIR
 
 # Modify the authentication check
 if DEBUG_MODE or check_password():
-    # Your main app code here
-    if st.session_state.page == "Home":
-        st.markdown(
-            "<h1 style='text-align: center; font-size: 100px; font-family: Arial, sans-serif;'>"
-            "<span style='background: linear-gradient(45deg, #FE6B8B 30%, #FF8E53 90%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;'>"
-            "7bot</span></h1>", 
-            unsafe_allow_html=True
-        )
-        
-        # Center the Start button
-        col1, col2, col3 = st.columns([1,2,1])
-        with col2:
-            if st.button("Start", use_container_width=True):
-                st.session_state.page = "Start"
-                st.rerun()
-
-    # Start page
-    elif st.session_state.page == "Start":
-        render_start_page()
+    # Remove the Home page and go directly to Start page
+    render_start_page()
 
     # Hide Streamlit elements
     hide_streamlit_style = """
