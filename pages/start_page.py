@@ -227,6 +227,7 @@ def render_upload_section():
                                  help="If checked, the conversation will pause before major state transitions")
     
     uploaded_file = st.file_uploader("Upload your documents", type=['txt', 'pdf'])
+    
     if uploaded_file:
         try:
             with st.spinner("Processing file..."):
@@ -363,6 +364,7 @@ def handle_continue():
     with st.spinner("Processing next step..."):
         try:
             logger.info("Attempting to resume state machine with current state")
+
             result = st.session_state.state_machine.resume(st.session_state.current_state)
             
             if result is None:
@@ -376,7 +378,11 @@ def handle_continue():
             time.sleep(1)
             st.rerun()
         except Exception as e:
-            handle_error("Error processing step", e)
+            if "Recursion limit" in str(e):
+                st.error("The conversation appears to be stuck in a loop. Try resetting or adjusting the state.")
+                logger.error(f"Recursion limit reached: {e}")
+            else:
+                handle_error("Error processing step", e)
 
 def handle_retry():
     with st.spinner("Retrying last step..."):

@@ -31,6 +31,7 @@ import os
 from langchain_openai import ChatOpenAI
 import json
 import logging
+import time  # Add this at the top with other imports
 try:
     from .agent_base import BaseAgent
 except:
@@ -55,7 +56,6 @@ def setup_logging():
 
 load_dotenv()
 
-recursion_limit = os.getenv("RECURSION_LIMIT", 15)
 
 #set_llm_cache(InMemoryCache())
 
@@ -74,7 +74,15 @@ def pydantic_to_json(pydantic_obj):
 class Level1Decision(BaseModel):
     reasoning: str
     decision: Literal["search_more_information", "converse_with_superiors"]
-    content: Union[List[str], str] = Field(min_items=1)
+    content: Union[str, List[str], dict] = Field(default_factory=dict)
+
+    def get_content_as_string(self) -> str:
+        """Convert content to string regardless of input type"""
+        if isinstance(self.content, dict):
+            return json.dumps(self.content)
+        elif isinstance(self.content, list):
+            return " ".join(str(item) for item in self.content)
+        return str(self.content)
 
 
 
@@ -177,20 +185,17 @@ class Level1Agent(BaseAgent):
             print(f"Decision: {response.decision}")
             print(f"Content: {response.content}")
 
-        response.content = " ".join(response.content)
-        self.logger.info(f"Decision: {response.decision}, Content: {response.content}")
-
-        resp = self.create_message(pydantic_to_json(response))
+        # Use the content_as_string method to safely convert any content type
+        content_str = response.get_content_as_string()
+        message = self.create_message(content=content_str)
+        resp = self.create_message(content=pydantic_to_json(response))
 
         if response.decision == "search_more_information":
-            questions = response.content
-            message = self.create_message((questions))
             return { f"{self.name}_assistant_conversation": [message],
                      f"{self.name}_mode": ["research"],
                      f"{self.name}_messages": [resp]
                     }
         else:
-
             return { f"{self.supervisor_name}_level1_2_conversation": [message],
                      f"{self.name}_mode": ["converse"],
                      f"{self.name}_messages": [resp]
@@ -220,6 +225,7 @@ class Level1Agent(BaseAgent):
             except Exception as e:
                 self.logger.warning(f"Error invoking assistant_llm with message: {e}")
                 response = self.assistant_llm.invoke(f"Question from executive: {last_message.content}.")
+                self.logger.info(f"assistant answer: {response}")
 
             response = self.create_message(pydantic_to_json(response), agent_name=f"assistant_{self.name}")
             
@@ -591,7 +597,12 @@ class StateMachines():
         self.memory = SqliteSaver.from_conn_stringx(":memory:")
         self.prompt_dir = prompt_dir
         self.final_graph , self.unified_state_schema = self._create_agents_graph()
-        self.config = {"configurable": {"thread_id": "1"}}
+        self.config = {
+            "recursion_limit": 50, 
+            "configurable":{
+                "thread_id": "2",
+            }
+        }
 
     def _create_unified_state_schema(self, level1_agents, level2_agents, ceo_agent):
         unified_fields = {
@@ -762,12 +773,15 @@ class StateMachines():
             return ceo_router_up
         
         def ceo_router_up_node(state):
+            logging.info("CEO Router Up Node - Processing")
+            time.sleep(5)  # Add 2-second delay
             return {"empty_channel": 1}
         
         workflow.add_node("ceo_router_up", ceo_router_up_node)
         
         def ceo_router_down(state):
-            # This function will be called when the router node is executed
+            logging.info("CEO Router Down - Processing")
+            time.sleep(2)  # Add 2-second delay
             return {"empty_channel": 1}
 
         workflow.add_node("ceo_router_down" , ceo_router_down  )
@@ -783,7 +797,7 @@ class StateMachines():
             # Add Level 2 agent node
             workflow.add_node(f"{l2_agent.name}_supervisor", l2_agent.level2_supervisor_node)
 
-        workflow.add_node("END", lambda state: state)
+        workflow.add_node("END", lambda state: {"empty_channel": 1})
         # Add conditional edges based on the should_continue function
         workflow.add_conditional_edges(
             "ceo",
@@ -818,6 +832,8 @@ class StateMachines():
 
             def create_level2_router_down(agent_name):
                 def level2_router(state):
+                    logging.info(f"{agent_name} Router Down - Processing")
+                    time.sleep(1)  # Add 2-second delay
                     return {"empty_channel": 1}
                 level2_router.__name__ = f"{agent_name}_router_down"
                 return level2_router
@@ -837,6 +853,8 @@ class StateMachines():
             
             def create_level2_router_up_node(agent_name):
                 def level2_router_node(state):
+                    logging.info(f"{agent_name} Router Up Node - Processing")
+                    time.sleep(5)  # Add 2-second delay
                     return {"empty_channel": 1}
                 level2_router_node.__name__ = f"{agent_name}_router_up"
                 return level2_router_node
@@ -921,6 +939,10 @@ class StateMachines():
         Image.open(io.BytesIO(self.final_graph.get_graph().draw_mermaid_png())).save(f'{name}.png')
     
     def start(self, initial_state):
+        # Ensure recursion_limit is set before starting
+        if "recursion_limit" not in self.config:
+            self.config["recursion_limit"] = 50
+            
         result = self.final_graph.invoke(initial_state, self.config)
         if result is None:
             values = self.final_graph.get_state(self.config).values
@@ -929,6 +951,10 @@ class StateMachines():
         return result
     
     def resume(self, new_state: dict):
+        # Ensure recursion_limit is set before resuming
+        if "recursion_limit" not in self.config:
+            self.config["recursion_limit"] = 50
+            
         # Get the current state values
         current_state = self.final_graph.get_state(self.config).values
         # Update the current state with new values from new_state
@@ -1005,6 +1031,10 @@ if __name__ == "__main__":
         result = state_machines.resume(new_values)
 
     logger.info("Graph execution completed.")
+
+
+
+
 
 
 

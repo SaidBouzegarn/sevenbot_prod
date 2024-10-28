@@ -60,7 +60,7 @@ class BaseAgent:
         **kwargs: Any
     ):
         self.name = name
-        self.tools = tools or [DuckDuckGoSearchRun()]
+        self.tools = tools
         self.llm = self._construct_llm(llm, llm_params)
         self.assistant_llm = self._construct_llm(assistant_llm, assistant_llm_params, tools=True)
         self.system_message = system_message
