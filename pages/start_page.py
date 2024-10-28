@@ -221,6 +221,11 @@ def render_start_page():
 def render_upload_section():
     st.markdown('<div class="upload-container">', unsafe_allow_html=True)
     
+    # Add checkbox for interrupt_before
+    interrupt_before = st.checkbox("Interrupt before state transitions", 
+                                 value=True,
+                                 help="If checked, the conversation will pause before major state transitions")
+    
     uploaded_file = st.file_uploader("Upload your documents", type=['txt', 'pdf'])
     if uploaded_file:
         try:
@@ -234,7 +239,7 @@ def render_upload_section():
                 
                 # Show the Start button only after successful upload
                 if st.button("Start Conversation", use_container_width=True):
-                    initialize_conversation(content)
+                    initialize_conversation(content, interrupt_before)
         except Exception as e:
             handle_error("Error processing file", e)
     
@@ -305,25 +310,30 @@ def render_conversation_messages(key):
 
 # Add caching for the state machine
 @st.cache_resource
-def get_shared_state_machine():
+def get_shared_state_machine(interrupt_before: bool = True):
     """Create a single StateMachine instance shared across all sessions"""
-    logger.info("Creating new shared StateMachine instance")
+    logger.info(f"Creating new shared StateMachine instance with interrupt_before={interrupt_before}")
     prompts_dir = os.path.join("Data", "Prompts")
-    return StateMachines(str(prompts_dir).strip())
+    return StateMachines(str(prompts_dir).strip(), interrupt_before)
 
 def initialize_state_machine():
     with st.spinner("Initializing state machine..."):
         try:
-            # Use the shared cached instance
-            st.session_state.state_machine = get_shared_state_machine()
-            logger.info("Using shared state machine instance")
+            # Get interrupt_before value from session state, default to True if not set
+            interrupt_before = st.session_state.get('interrupt_before', True)
+            # Use the shared cached instance with interrupt_before parameter
+            st.session_state.state_machine = get_shared_state_machine(interrupt_before)
+            logger.info(f"Using shared state machine instance with interrupt_before={interrupt_before}")
             st.success("State machine initialized successfully!")
         except Exception as e:
             handle_error("Failed to initialize state machine", e)
 
-def initialize_conversation(content):
+def initialize_conversation(content, interrupt_before: bool):
     with st.spinner("Initializing conversation..."):
         try:
+            # Store interrupt_before in session state
+            st.session_state.interrupt_before = interrupt_before
+            
             initial_state = {
                 "news_insights": [content],
                 "digest": [""],
@@ -338,6 +348,11 @@ def initialize_conversation(content):
             
             st.session_state.current_state = result
             st.session_state.conversation_started = True
+            
+            # Clean up the file content from session state
+            if 'file_content' in st.session_state:
+                del st.session_state.file_content
+            
             st.success("Conversation started successfully!")
             time.sleep(1)
             st.rerun()

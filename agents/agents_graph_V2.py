@@ -578,8 +578,9 @@ class Level3Agent(BaseAgent):
 ##########################################################################################
 
 class StateMachines():
-    def __init__(self, prompt_dir):
+    def __init__(self, prompt_dir, interrupt_graph_before = True):
         self.logger = logging.getLogger(__name__)
+        self.interrupt_graph_before = interrupt_graph_before
         
         def from_conn_stringx(cls, conn_string: str,) -> "SqliteSaver":
             return SqliteSaver(conn=sqlite3.connect(conn_string, check_same_thread=False))
@@ -898,14 +899,19 @@ class StateMachines():
 
                 
         # Compile the main graph
-        final_graph = workflow.compile(
-            checkpointer=self.memory,
-            interrupt_before=[
-                #"ceo",
-                *[f"{l2_agent.name}_supervisor" for l2_agent in level2_agents],
-                #*[f"agent_{l1_agent.name}" for l1_agent in level1_agents]
+        if self.interrupt_graph_before:
+            final_graph = workflow.compile(
+                checkpointer=self.memory,
+                interrupt_before=[
+                    #"ceo",
+                    *[f"{l2_agent.name}_supervisor" for l2_agent in level2_agents],
+                    #*[f"agent_{l1_agent.name}" for l1_agent in level1_agents]
             ]
-        )
+            )
+        else:
+            final_graph = workflow.compile(
+                checkpointer=self.memory,
+            )
         
         self.logger.info("Agents graph created successfully")
 
