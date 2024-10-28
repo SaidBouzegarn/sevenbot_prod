@@ -303,15 +303,20 @@ def render_conversation_messages(key):
             if edited != content:
                 st.session_state.current_state[key][i] = preserve_message_type(edited)
 
-# Helper functions for state management and error handling
+# Add caching for the state machine
+@st.cache_resource
+def get_shared_state_machine():
+    """Create a single StateMachine instance shared across all sessions"""
+    logger.info("Creating new shared StateMachine instance")
+    prompts_dir = os.path.join("Data", "Prompts")
+    return StateMachines(str(prompts_dir).strip())
+
 def initialize_state_machine():
     with st.spinner("Initializing state machine..."):
         try:
-            base_dir = Path(__file__).resolve().parent.parent
-            prompts_dir = os.path.join("Data", "Prompts")
-            logger.info(f"Attempting to initialize StateMachines with prompts_dir: {prompts_dir}")
-            st.session_state.state_machine = StateMachines(str(prompts_dir).strip())
-            logger.info("State machine initialized successfully!")
+            # Use the shared cached instance
+            st.session_state.state_machine = get_shared_state_machine()
+            logger.info("Using shared state machine instance")
             st.success("State machine initialized successfully!")
         except Exception as e:
             handle_error("Failed to initialize state machine", e)

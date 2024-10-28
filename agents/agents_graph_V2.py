@@ -24,7 +24,6 @@ from langchain_openai import ChatOpenAI
 from langchain.globals import set_llm_cache
 from langchain_community.cache import InMemoryCache
 from langchain_core.messages import trim_messages
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import START, MessagesState, StateGraph
 from datetime import datetime
 from dotenv import load_dotenv
@@ -83,7 +82,17 @@ class Level1Decision(BaseModel):
 # count each message as 1 "token" (token_counter=len) and keep only the last two messages
 trimmer = trim_messages(strategy="last", max_tokens=5000, token_counter=ChatOpenAI(model="gpt-4o"), allow_partial=True)
 
+def keep_last_n(existing: List, updates: List) -> List:
+    """Keep only the last n items from the combined list."""
+    combined = existing + updates
+    return combined[-5:]
 
+def keep_last_item(existing: List, updates: List) -> List:
+    """Keep only the last item from the combined list."""
+    combined = existing + updates
+    return [combined[-1]] if combined else []
+def keep_last_elem(existing, updates) -> List:
+    return updates
 
 class Level1Agent(BaseAgent):
     def __init__(self, *args, **kwargs):
@@ -598,19 +607,19 @@ class StateMachines():
                 )])
             ),
             "ceo_messages": (
-                Annotated[List, add_messages], 
+                Annotated[List, keep_last_n], 
                 Field(default_factory=lambda: [HumanMessage(
                     content="Initiating CEO strategic review session. Focus areas include market analysis, organizational alignment, and strategic decision-making."
                 )])
             ),
             "ceo_assistant_conversation": (
-                Annotated[List, add_messages], 
+                Annotated[List, keep_last_n], 
                 Field(default_factory=lambda: [HumanMessage(
                     content="Starting CEO advisory session. Ready to assist with market research, data analysis, and strategic insights compilation."
                 )])
             ),
             "ceo_mode": (
-                Annotated[List[Literal["research_information", "write_to_digest", "communicate_with_directors", "communicate_with_executives", "end"]], operator.add],
+                Annotated[List[Literal["research_information", "write_to_digest", "communicate_with_directors", "communicate_with_executives", "end"]], keep_last_item],
                 Field(default_factory=lambda: ["research_information"])
             ),
             "company_knowledge": (
@@ -618,7 +627,7 @@ class StateMachines():
                 Field(default_factory=list)
             ),
             "news_insights": (
-                Annotated[List[str], operator.add],
+                Annotated[List[str], keep_last_item],
                 Field(default_factory=list)
             ),
             "digest": (
@@ -626,25 +635,29 @@ class StateMachines():
                 Field(default_factory=list)
             ),
             "ceo_runs_counter": (
-                Annotated[int, operator.add],
+                Annotated[int, keep_last_elem],
                 Field(default=0)
+            ),
+            "empty_channel": (
+                Annotated[int, keep_last_elem],
+                Field(default_factory=lambda: [])
             )
         }
 
         # Add default modes for all agents
         for agent in level1_agents:
             unified_fields[f"{agent.name}_mode"] = (
-                Annotated[List[Literal["research", "converse"]], operator.add],
+                Annotated[List[Literal["research", "converse"]], keep_last_item],
                 Field(default_factory=lambda: ["research"])
             )
             unified_fields[f"{agent.name}_assistant_conversation"] = (
-                Annotated[List, add_messages],
+                Annotated[List, keep_last_n],
                 Field(default_factory=lambda: [HumanMessage(
                     content=f"Starting research session for {agent.name}. Ready to assist with information gathering and analysis to support executive decision-making."
                 )])
             )
             unified_fields[f"{agent.name}_messages"] = (
-                Annotated[List, add_messages],
+                Annotated[List, keep_last_n],
                 Field(default_factory=lambda: [HumanMessage(content="")])
             )
             unified_fields[f"{agent.name}_domain_knowledge"] = (
@@ -654,11 +667,11 @@ class StateMachines():
 
         for agent in level2_agents:
             unified_fields[f"{agent.name}_mode"] = (
-                Annotated[List[Literal["aggregate_for_ceo", "break_down_for_executives"]], operator.add],
+                Annotated[List[Literal["aggregate_for_ceo", "break_down_for_executives"]], keep_last_item],
                 Field(default_factory=lambda: ["break_down_for_executives"])
             )
             unified_fields[f"{agent.name}_messages"] = (
-                Annotated[List, add_messages],
+                Annotated[List, keep_last_n],
                 Field(default_factory=lambda: [HumanMessage(content="")])
             )
             unified_fields[f"{agent.name}_level1_2_conversation"] = (
@@ -748,13 +761,13 @@ class StateMachines():
             return ceo_router_up
         
         def ceo_router_up_node(state):
-            return state
+            return {"empty_channel": 1}
         
         workflow.add_node("ceo_router_up", ceo_router_up_node)
         
         def ceo_router_down(state):
             # This function will be called when the router node is executed
-            return state
+            return {"empty_channel": 1}
 
         workflow.add_node("ceo_router_down" , ceo_router_down  )
 
@@ -804,7 +817,7 @@ class StateMachines():
 
             def create_level2_router_down(agent_name):
                 def level2_router(state):
-                    return state
+                    return {"empty_channel": 1}
                 level2_router.__name__ = f"{agent_name}_router_down"
                 return level2_router
         
@@ -823,7 +836,7 @@ class StateMachines():
             
             def create_level2_router_up_node(agent_name):
                 def level2_router_node(state):
-                    return state
+                    return {"empty_channel": 1}
                 level2_router_node.__name__ = f"{agent_name}_router_up"
                 return level2_router_node
 

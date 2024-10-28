@@ -13,7 +13,7 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent
 
 # Add this near the top of your file, after imports
-DEBUG_MODE = False  # Set to False to enable authentication
+DEBUG_MODE = True  # Set to False to enable authentication
 
 # Add CSS for the stylish landing page
 def add_custom_css():
