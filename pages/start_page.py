@@ -310,7 +310,9 @@ def render_conversation_messages(key):
                 st.session_state.current_state[key][i] = preserve_message_type(edited)
 
 # Add caching for the state machine
-@st.cache_resource
+
+#@st.cache_resource
+
 def get_shared_state_machine(interrupt_before: bool = True):
     """Create a single StateMachine instance shared across all sessions"""
     logger.info(f"Creating new shared StateMachine instance with interrupt_before={interrupt_before}")

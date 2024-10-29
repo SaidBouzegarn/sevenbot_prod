@@ -652,7 +652,7 @@ class StateMachines():
             ),
             "empty_channel": (
                 Annotated[int, keep_last_elem],
-                Field(default_factory=lambda: [])
+                Field(default_factory=lambda: 1)
             )
         }
 
@@ -707,7 +707,7 @@ class StateMachines():
 
     def _create_agents_graph(self):
         # Common configuration
-        tools = []
+        tools = [DuckDuckGoSearchRun()]
         debug = False
 
         # Create Level 3 agent (CEO)
@@ -833,7 +833,7 @@ class StateMachines():
             def create_level2_router_down(agent_name):
                 def level2_router(state):
                     logging.info(f"{agent_name} Router Down - Processing")
-                    time.sleep(1)  # Add 2-second delay
+                    time.sleep(15)  # Add 2-second delay
                     return {"empty_channel": 1}
                 level2_router.__name__ = f"{agent_name}_router_down"
                 return level2_router
@@ -846,6 +846,7 @@ class StateMachines():
 
             def create_level2_router_up(agent_name, subordinates):
                 def level2_router(state):
+                    logging.info(f"agents modes are {[getattr(state, f'{sub}_mode')[-1] for sub in subordinates]}")
                     return "complete" if all([getattr(state, f"{sub}_mode")[-1] == "converse" 
                                               for sub in subordinates]) else "continue"
                 level2_router.__name__ = f"{agent_name}_router_up"
@@ -861,11 +862,17 @@ class StateMachines():
 
             router_function_up = create_level2_router_up(l2_agent.name, l2_agent.subordinates)
             router_node_up = create_level2_router_up_node(l2_agent.name)
-            workflow.add_node(router_name_up, router_node_up)
+            
+            #workflow.add_node(router_name_up, router_node_up)
 
+
+            
             for l1_agent in level1_agents :
                 if l1_agent.name in l2_agent.subordinates:
                     workflow.add_edge(router_name_down , f"agent_{l1_agent.name}")
+
+                    waiter_node_name = f"{l1_agent.name}_waiter"
+                    workflow.add_node(waiter_node_name, lambda state: {"empty_channel": 1})
 
                     workflow.add_conditional_edges(
                     f"agent_{l1_agent.name}",
@@ -873,7 +880,7 @@ class StateMachines():
                     lambda state: l1_agent.get_attr(state, "mode")[-1] if l1_agent.get_attr(state, "mode") else "converse",
                         {
                             "research" : f"assistant_{l1_agent.name}",
-                            "converse": router_name_up
+                            "converse": waiter_node_name
                         }
                     )
                     workflow.add_conditional_edges(f"assistant_{l1_agent.name}", l1_agent.should_continue,
@@ -886,15 +893,18 @@ class StateMachines():
                     )
                     workflow.add_edge(f"tools_{l1_agent.name}", f"assistant_{l1_agent.name}")
 
+            workflow.add_edge([f"{l1_agent_name}_waiter" for l1_agent_name in l2_agent.subordinates], f"{l2_agent.name}_supervisor")
             # Add conditional edges for the router
-            workflow.add_conditional_edges(
-                router_name_up,
-                router_function_up,
-                {
-                    "complete": f"{l2_agent.name}_supervisor",
-                    "continue": router_name_up  # Loop back if not all subordinates are ready
-                }
-            )
+            
+            #workflow.add_conditional_edges(
+            #    router_name_up,
+            #    router_function_up,
+            #    {
+            #        "complete": f"{l2_agent.name}_supervisor",
+            #        "continue": router_name_up  # Loop back if not all subordinates are ready
+            #    }
+            #)
+
             workflow.add_conditional_edges(
                 f"{l2_agent.name}_supervisor",
                 l2_agent.should_continue,

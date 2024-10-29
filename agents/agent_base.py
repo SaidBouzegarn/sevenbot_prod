@@ -62,12 +62,12 @@ class BaseAgent:
         self.name = name
         self.tools = tools
         self.llm = self._construct_llm(llm, llm_params)
-        self.assistant_llm = self._construct_llm(assistant_llm, assistant_llm_params, tools=True)
+        self.assistant_llm = self._construct_llm(assistant_llm, assistant_llm_params)
         self.system_message = system_message
         self.debug = debug
         self.kwargs = kwargs
 
-    def _construct_llm(self, llm_name: str, llm_params: Dict[str, Any], tools: bool = False) -> BaseLanguageModel:
+    def _construct_llm(self, llm_name: str, llm_params: Dict[str, Any], tools: List[BaseTool] = None) -> BaseLanguageModel:
         """Construct the appropriate LLM based on the input string and parameters."""
         if llm_name in OPENAI_MODELS:
             llm = ChatOpenAI(model_name=llm_name, **llm_params)
