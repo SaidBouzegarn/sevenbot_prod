@@ -60,11 +60,26 @@ load_dotenv()
 #set_llm_cache(InMemoryCache())
 
 def pydantic_to_json(pydantic_obj):
-    # Convert to dictionary and then to a compact JSON string
+    # Convert to dictionary and then to a formatted JSON string
     obj_dict = pydantic_obj.dict()
-    # Use separators to minimize whitespace: (',', ':') removes spaces after commas and colons
-    compact_string = json.dumps(obj_dict, separators=(',', ':'))
-    return compact_string
+    # Use indent parameter to format the JSON output
+    formatted_string = json.dumps(obj_dict, indent=4)
+    return formatted_string
+
+def keep_last_n(existing: List, updates: List) -> List:
+    """Keep only the last n items from the combined list."""
+    combined = existing + updates
+    return combined[-5:]
+
+def keep_last_item(existing: List, updates: List) -> List:
+    """Keep only the last item from the combined list."""
+    combined = existing + updates
+    return [combined[-1]] if combined else []
+def keep_last_elem(existing, updates) -> List:
+    return updates
+
+def prepare_messages_agent(messages: List[BaseMessage], agent_name: str) -> str:
+    return trimmer.invoke(messages)
 
 ##########################################################################################
 #################################### Level 1 agent #######################################
@@ -90,17 +105,7 @@ class Level1Decision(BaseModel):
 # count each message as 1 "token" (token_counter=len) and keep only the last two messages
 trimmer = trim_messages(strategy="last", max_tokens=5000, token_counter=ChatOpenAI(model="gpt-4o"), allow_partial=True)
 
-def keep_last_n(existing: List, updates: List) -> List:
-    """Keep only the last n items from the combined list."""
-    combined = existing + updates
-    return combined[-5:]
 
-def keep_last_item(existing: List, updates: List) -> List:
-    """Keep only the last item from the combined list."""
-    combined = existing + updates
-    return [combined[-1]] if combined else []
-def keep_last_elem(existing, updates) -> List:
-    return updates
 
 class Level1Agent(BaseAgent):
     def __init__(self, *args, **kwargs):
@@ -117,68 +122,41 @@ class Level1Agent(BaseAgent):
         self.trimmer = trimmer
         self.logger = logging.getLogger(f"{self.__class__.__name__}_{self.name}")
 
+    def create_message(self, content: str, agent_name: str = None, mode: str = None):
+        if not agent_name:
+            agent_name = self.name
+        if mode == "research":
+            return HumanMessage(content=f"""{agent_name} message  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} -
+                                 researching information, will respond after research is complete: {content}""")
+        else:
+            return HumanMessage(content=f"""{agent_name} message  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - 
+                                {content}""")
+    
     def level1_node(self, state):
         self.logger.info(f"Executing level1_node for {self.name}")
         
-        if not self.get_attr(state, "messages"):
-            self.get_attr(state, "messages").append(self.system_message)
-            
-        # Initialize last_messages with default values
-        last_messages = {
-            "level1_2_conversation": "No messages from level 2 yet.",
-            "level1_3_conversation": "No messages from level 3 yet."
-        }
-        
-        # Safely get last messages if conversations exist and have messages
-        if self.get_attr(state, f"{self.supervisor_name}_level1_2_conversation"):
-            if len(self.get_attr(state, f"{self.supervisor_name}_level1_2_conversation")) > 0:
-                last_messages["level1_2_conversation"] = self.get_attr(state, f"{self.supervisor_name}_level1_2_conversation")[-min(3, len(self.get_attr(state, f"{self.supervisor_name}_level1_2_conversation")))].content
-        
-        if self.get_attr(state, "level1_3_conversation"):
-            if len(self.get_attr(state, "level1_3_conversation")) > 0:
-                last_messages["level1_3_conversation"] = self.get_attr(state, "level1_3_conversation")[-min(3, len(self.get_attr(state, "level1_3_conversation")))].content
-        
-        if self.debug:
-            print(f"Last message: {last_messages}")
 
-        # Initialize empty lists for conversations if they don't exist
-        if not self.get_attr(state, "level1_2_conversation"):
-            self.get_attr(state, "level1_2_conversation").append(HumanMessage(
-                content="Starting meeting between supervisor and executives. The executives will report on their findings and receive guidance from their supervisor."
-            ))
-        
-        if not self.get_attr(state, "level1_3_conversation"):
-            self.get_attr(state, "level1_3_conversation").append(HumanMessage(
-                content="Starting meeting between CEO and executives. The executives will provide insights and receive strategic direction from the CEO."
-            ))
-        
-        if not self.get_attr(state, "assistant_conversation"):
-            self.get_attr(state, "assistant_conversation").append(HumanMessage(
-                content="Starting research session between executive and assistant. The assistant will help gather information and analyze data to support executive decision-making."
-            ))
 
+        conversation = self.get_attr(state, "meeting_simulation")
+        trimmed_conversation = prepare_messages_agent(conversation, self.name)
+        assistant_conversation = self.get_attr(state, "assistant_conversation")
+        try :
+            trimmed_assistant_conversation = prepare_messages_agent(assistant_conversation, self.name)
+        except :
+            trimmed_assistant_conversation = assistant_conversation
         # Trim messages before rendering the decision prompt
-        trimmed_level1_2_conversation = self.trimmer.invoke(self.get_attr(state, "level1_2_conversation"))
-        trimmed_level1_3_conversation = self.trimmer.invoke(self.get_attr(state, "level1_3_conversation"))
-        trimmed_assistant_conversation = self.trimmer.invoke(self.get_attr(state, "assistant_conversation"))
 
         decision_prompt = self.jinja_env.get_template('decision_prompt.j2').render(
-            last_message=last_messages,
-            level1_2_conversation=trimmed_level1_2_conversation,
-            level1_3_conversation=trimmed_level1_3_conversation,
+            conversation=trimmed_conversation,
             assistant_conversation=trimmed_assistant_conversation,
             tools=self.tools
         )
         
-        if state.ceo_runs_counter < 2:
-            self.get_attr(state, "messages").append(self.system_prompt)
-
         # Use the decision prompt
         message = HumanMessage(content=decision_prompt)
-        self.get_attr(state, "messages").append(message)
-        trimmed_message = self.trimmer.invoke(self.get_attr(state, "messages"))
+
         structured_llm = self.llm.with_structured_output(Level1Decision)
-        response = structured_llm.invoke(trimmed_message)
+        response = structured_llm.invoke([self.system_prompt, message])
 
         if self.debug:
             print(f"Reasoning: {response.reasoning}")
@@ -187,18 +165,19 @@ class Level1Agent(BaseAgent):
 
         # Use the content_as_string method to safely convert any content type
         content_str = response.get_content_as_string()
-        message = self.create_message(content=content_str)
+
+        message = self.create_message(content=content_str, mode="level1")
         resp = self.create_message(content=pydantic_to_json(response))
 
         if response.decision == "search_more_information":
-            return { f"{self.name}_assistant_conversation": [message],
+            return { f"{self.name}_assistant_conversation": [response.content],
                      f"{self.name}_mode": ["research"],
-                     f"{self.name}_messages": [resp]
+                     f"meeting_simulation": [resp]
                     }
         else:
             return { f"{self.supervisor_name}_level1_2_conversation": [message],
                      f"{self.name}_mode": ["converse"],
-                     f"{self.name}_messages": [resp]
+                     f"meeting_simulation": [resp]
             }
 
     def assistant_node(self, state) -> Dict[str, Any]:
@@ -218,13 +197,13 @@ class Level1Agent(BaseAgent):
         try:
             last_message = assistant_conversation[-1]
             print(f"Processing question from {self.name}: {last_message.content}")
-            assistant_message = self.create_message(content=prompt.render(question=last_message.content))
+            assistant_message = self.create_message(content=prompt.render(question=last_message))
             
             try:
                 response = self.assistant_llm.invoke(assistant_message)
             except Exception as e:
                 self.logger.warning(f"Error invoking assistant_llm with message: {e}")
-                response = self.assistant_llm.invoke(f"Question from executive: {last_message.content}.")
+                response = self.assistant_llm.invoke(f"Question from executive: {last_message}.")
                 self.logger.info(f"assistant answer: {response}")
 
             response = self.create_message(pydantic_to_json(response), agent_name=f"assistant_{self.name}")
@@ -260,6 +239,7 @@ class Level1Agent(BaseAgent):
             **{
                 f"{self.supervisor_name}_level1_2_conversation": (Annotated[List, add_messages], Field(default_factory=list)),
                 f"level1_3_conversation": (Annotated[List, add_messages], Field(default_factory=list)),
+                f"meeting_simulation": (Annotated[List, add_messages], Field(default_factory=list)),
                 f"{self.name}_assistant_conversation": (Annotated[List, add_messages], Field(default_factory=list)),
                 f"{self.name}_domain_knowledge": (Annotated[List[str], operator.add], Field(default_factory=lambda: [])),
                 f"{self.name}_mode": (Annotated[List[Literal["research", "converse"]], operator.add], Field(default_factory=lambda: ["research"])),
@@ -316,38 +296,25 @@ class Level2Agent(BaseAgent):
         self.trimmer = trimmer
         self.logger = logging.getLogger(f"{self.__class__.__name__}_{self.name}")
     
+    def create_message(self, content: str, agent_name: str = None):
+        if not agent_name:
+            agent_name = self.name
 
+        return HumanMessage(content=f"""{agent_name} message  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - 
+                                {content}""")
+    
     def level2_supervisor_node(self, state):
-        if not state.ceo_runs_counter > 1:
-            self.get_attr(state, "messages").append(self.system_prompt)
 
-        # Initialize conversations if they don't exist
-        if not self.get_attr(state, "level1_2_conversation"):
-            self.get_attr(state, "level1_2_conversation").append(HumanMessage(
-                content=f"Starting supervisory session for {self.name}. As a director, I will coordinate between executives and CEO, ensuring departmental alignment and strategic implementation. Current focus is on reviewing reports from {', '.join(self.subordinates)}."
-            ))
 
-        if not self.get_attr(state, "level2_3_conversation"):
-            self.get_attr(state, "level2_3_conversation").append(HumanMessage(
-                content=f"Starting director-CEO alignment session for {self.name}. Ready to present consolidated insights from departments {', '.join(self.subordinates)} and receive strategic guidance."
-            ))
+        conversation = self.get_attr(state, "meeting_simulation")
+        try :
+            trimmed_conversation = prepare_messages_agent(conversation, self.name)
+        except :
+            trimmed_conversation = conversation
 
-        # Safely get the last 3 messages
-        def get_last_n_messages(messages, n=3):
-            if not messages:
-                return []
-            return messages[-min(n, len(messages)):]
-
-        level1_2_last_3 = get_last_n_messages(self.get_attr(state, "level1_2_conversation"))
-        level2_3_last_3 = get_last_n_messages(self.get_attr(state, "level2_3_conversation"))
-
-        # Only trim if we have messages
-        trimmed_level1_2_last_3 = self.trimmer.invoke(level1_2_last_3) if level1_2_last_3 else []
-        trimmed_level2_3_last_3 = self.trimmer.invoke(level2_3_last_3) if level2_3_last_3 else []
 
         decision_prompt = self.jinja_env.get_template('decision_prompt.j2').render(
-            superior_message=trimmed_level2_3_last_3,
-            subordinate_messages=trimmed_level1_2_last_3,
+            meeting_simulation=trimmed_conversation,
             subordinates_list=self.subordinates
         )
         
@@ -364,16 +331,15 @@ class Level2Agent(BaseAgent):
         message = self.create_message(content=pydantic_to_json(response))
 
         if response.decision == "aggregate_for_ceo":
-
             
-            return { f"level2_3_conversation": [message],
+            return { f"meeting_simulation": [message],
                         f"{self.name}_mode": ["aggregate_for_ceo"],
                         f"{self.name}_messages": [message]
             }
         
         elif response.decision == "break_down_for_executives":
 
-            return { f"{self.name}_level1_2_conversation": [message],
+            return { f"meeting_simulation": [message],
                         f"{self.name}_mode": ["break_down_for_executives"],
                         f"{self.name}_messages": [message]
             }
@@ -397,6 +363,7 @@ class Level2Agent(BaseAgent):
             **{
                 f"{self.name}_level1_2_conversation": (Annotated[List, add_messages], ...),
                 f"level2_3_conversation": (Annotated[List, add_messages], ...),
+                f"meeting_simulation": (Annotated[List, add_messages], ...),
                 f"{self.name}_messages": (Annotated[List, add_messages], ...),
                 f"{self.name}_mode": (Annotated[List[Literal["aggregate_for_ceo", "break_down_for_executives"]], operator.add], Field(default_factory=lambda: ["break_down_for_executives"])),
             },
@@ -435,6 +402,7 @@ class Level3State(BaseModel):
     ceo_assistant_conversation: Annotated[List, add_messages]
     ceo_mode: Annotated[List[Literal["research_information", "write_to_digest", "communicate_with_directors", "communicate_with_executives", "end"]], operator.add, Field(default_factory=lambda: ["communicate_with_executives"])]
     ceo_runs_counter: Annotated[int, operator.add, Field(default=0)]
+    meeting_simulation: Annotated[List, add_messages]
 
 class CEODecision(BaseModel):
     reasoning: str
@@ -454,26 +422,40 @@ class Level3Agent(BaseAgent):
         self.trimmer = trimmer
         self.logger = logging.getLogger(f"{self.__class__.__name__}_{self.name}")
 
+    def create_message(self, content: str, agent_name: str = None, mode: str = None):
+        if not agent_name:
+            agent_name = self.name
+
+        if mode == "research_information":
+            return HumanMessage(content=f"""{agent_name} message  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} -
+                                 researching information, will respond after research is complete: {content}""")
+        elif mode == "write_to_digest":
+            return HumanMessage(content=f"""{agent_name} message  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - 
+                                writing to digest: {content}""")
+        elif mode == "communicate_with_directors" or mode == "communicate_with_executives":
+            return HumanMessage(content=f"""{agent_name} message  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - 
+                                {content}""")
+    
     def ceo_node(self, state) -> Dict[str, Any]:
         state.ceo_runs_counter += 1
 
-        trimmed_level2_3_conversation = self.trimmer.invoke(state.level2_3_conversation)
-        trimmed_level1_3_conversation = self.trimmer.invoke(state.level1_3_conversation)
-        trimmed_ceo_assistant_conversation = self.trimmer.invoke(state.ceo_assistant_conversation)
+        meeting_simulation = state.meeting_simulation
+        trimmed_meeting_simulation = prepare_messages_agent(meeting_simulation, self.name)
+        assistant_conversation = state.ceo_assistant_conversation
+        try : 
+            trimmed_assistant_conversation = self.trimmer.invoke(assistant_conversation)
+        except :
+            trimmed_assistant_conversation = assistant_conversation
 
         decision_prompt = self.jinja_env.get_template('decision_prompt.j2').render(
             news_insights=state.news_insights,
-            level2_3_conversation=state.level2_3_conversation,
-            level1_3_conversation=state.level1_3_conversation,
+            meeting_simulation=trimmed_meeting_simulation,
+            assistant_conversation=trimmed_assistant_conversation,
             digest=state.digest,
             company_knowledge=state.company_knowledge
         )
         
-        if not state.ceo_runs_counter > 1:
-            state.ceo_messages.append(self.system_message)
-
-        state.ceo_messages.append(HumanMessage(content=decision_prompt, type="human", name=self.name))
-        trimmed_ceo_messages = self.trimmer.invoke(state.ceo_messages)
+        trimmed_ceo_messages = self.trimmer.invoke([self.system_message, HumanMessage(content=decision_prompt, type="human", name=self.name)])
         structured_llm = self.llm.with_structured_output(CEODecision)
         response = structured_llm.invoke(trimmed_ceo_messages)
 
@@ -486,28 +468,34 @@ class Level3Agent(BaseAgent):
             print(f"Content: {response.content}")
         
         if response.decision == "write_to_digest":
+            message = self.create_message(pydantic_to_json(response), mode="write_to_digest")
+
             return { f"digest": [response.content],
                      f"ceo_mode": ["write_to_digest"],
-                     f"ceo_messages": [HumanMessage(content=pydantic_to_json(response), type="human")]
+                     f"meeting_simulation": [message]
             }
         elif response.decision == "research_information":
+            message = self.create_message(pydantic_to_json(response), mode="research_information")
             return { f"ceo_assistant_conversation": [HumanMessage(content=response.content, type="human")],
                      f"ceo_mode": ["research_information"],
-                     f"ceo_messages": [HumanMessage(content=pydantic_to_json(response), type="human")]
+                     f"meeting_simulation": [message]
             }
         elif response.decision == "communicate_with_directors":
-            return { f"level2_3_conversation": [self.create_message(pydantic_to_json(response), type="human")],
+            message = self.create_message(pydantic_to_json(response), mode="communicate_with_directors")
+            return { f"level2_3_conversation": [message],
                      f"ceo_mode": ["communicate_with_directors"],
-                     f"ceo_messages": [HumanMessage(content=pydantic_to_json(response), type="human")]
+                     f"meeting_simulation": [message]
             }
         elif response.decision == "communicate_with_executives":
-            return { f"level1_3_conversation": [self.create_message(pydantic_to_json(response), type="human")],
+            message = self.create_message(pydantic_to_json(response), mode="communicate_with_executives")
+            return { f"level1_3_conversation": [message],
                      f"ceo_mode": ["communicate_with_executives"],
-                     f"ceo_messages": [HumanMessage(content=pydantic_to_json(response), type="human")]
+                     f"meeting_simulation": [message]
             }
         elif response.decision == "end":
+            message = self.create_message(pydantic_to_json(response), mode="end")
             return { f"ceo_mode": ["end"],
-                     f"ceo_messages": [HumanMessage(content=pydantic_to_json(response), type="human")]
+                     f"meeting_simulation": [message]
             }
         
 
@@ -525,7 +513,7 @@ class Level3Agent(BaseAgent):
             
             # Create and render the prompt
             prompt_content = prompt.render(
-                question=last_message.content,
+                question=last_message,
                 company_knowledge=state.company_knowledge,
                 digest=state.digest
             )
@@ -606,6 +594,12 @@ class StateMachines():
 
     def _create_unified_state_schema(self, level1_agents, level2_agents, ceo_agent):
         unified_fields = {
+            "meeting_simulation": (
+                Annotated[List, add_messages], 
+                Field(default_factory=lambda: [HumanMessage(
+                    content="Starting strategic alignment meeting between executives, directors and CEO. "
+                )])
+            ),
             "level2_3_conversation": (
                 Annotated[List, add_messages], 
                 Field(default_factory=lambda: [HumanMessage(

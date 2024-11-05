@@ -200,22 +200,23 @@ def render_start_page():
     # Add all styles
     add_start_page_css()
     add_custom_styles()
-    
-    # Add logo
+
+    # Render logo at the very top
     render_logo()
-    
+
     # Initialize state machine if needed
     if "state_machine" not in st.session_state or st.session_state.state_machine is None:
         initialize_state_machine()
-    
+
     if st.session_state.state_machine is None:
         st.error("State machine is not initialized. Please check the logs.")
         return
 
-    # Render appropriate view based on conversation state
+    # Render control panel and conversation state based on conversation status
     if not st.session_state.get("conversation_started", False):
         render_upload_section()
     else:
+        # Render control panel (buttons) and conversation state
         render_conversation_state()
 
 def render_upload_section():
@@ -247,67 +248,60 @@ def render_upload_section():
     st.markdown('</div>', unsafe_allow_html=True)
 
 def render_conversation_state():
-    # Wrap controls in a single container
+    # Wrap the buttons in a control panel at the top
     st.markdown('<div class="control-panel">', unsafe_allow_html=True)
-    
-    # State selector (now on the left)
-    st.markdown('<div class="state-selector">', unsafe_allow_html=True)
-    available_states = list(st.session_state.current_state.keys())
-    if 'selected_states' not in st.session_state:
-        st.session_state.selected_states = available_states[:4]
-    
-    selected_states = st.multiselect(
-        "Select state elements to display (max 4)",
-        available_states,
-        default=st.session_state.selected_states,
-        max_selections=4
-    )
-    
-    if len(selected_states) <= 4:
-        st.session_state.selected_states = selected_states
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Action buttons (now on the right)
-    st.markdown('<div class="action-buttons">', unsafe_allow_html=True)
-    if st.button("Continue", key="btn_continue"):
-        handle_continue()
-    if st.button("Retry", key="btn_retry"):
-        handle_retry()
-    if st.button("Reset", key="btn_reset"):
-        handle_reset()
-    if st.button("Quit and Save", key="btn_quit"):  # Removed css_class
-        quit_and_save()
-    if st.button("Delete All", key="btn_delete"):  # Removed css_class
-        delete_all()
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Render columns for selected states
-    if selected_states:
-        cols = st.columns(4)
-        for i, col in enumerate(cols):
-            with col:
-                if i < len(selected_states):
-                    state_key = selected_states[i]
-                    st.markdown(f'<div class="column-header">{state_key}</div>', 
-                              unsafe_allow_html=True)
-                    render_conversation_messages(state_key)
 
-def render_conversation_messages(key):
+    # Place buttons horizontally and centered
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col1:
+        if st.button("Continue", key="btn_continue"):
+            handle_continue()
+    with col2:
+        if st.button("Retry", key="btn_retry"):
+            handle_retry()
+    with col3:
+        if st.button("Reset", key="btn_reset"):
+            handle_reset()
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # Render columns for conversation messages
+    cols = st.columns(2)
+
+    with cols[0]:
+        st.markdown('<div class="column-header">Meeting Simulation</div>', unsafe_allow_html=True)
+        render_conversation_messages('meeting_simulation', only_content=True)  # Show only message content
+
+    with cols[1]:
+        # Dynamically choose from state elements that have 'conversation' in their names
+        current_state_keys = st.session_state.current_state.keys()
+        conversation_keys = [key for key in current_state_keys if 'conversation' in key]
+        if conversation_keys:
+            selected_state = st.selectbox("Select conversation to display", conversation_keys)
+            st.markdown(f'<div class="column-header">{selected_state}</div>', unsafe_allow_html=True)
+            render_conversation_messages(selected_state)
+        else:
+            st.info("No conversation elements available.")
+
+def render_conversation_messages(key, only_content=False):
     if key in st.session_state.current_state:
         messages = st.session_state.current_state[key]
         for i, msg in enumerate(messages):
-            content = msg.content if hasattr(msg, 'content') else str(msg)
-            edited = st.text_area(
-                f"{type(msg).__name__ if hasattr(msg, '__class__') else 'Message'} {i+1}",
-                content,
-                key=f"{key}_{i}",
-                height=150
-            )
-            # Store edited content back to state
-            if edited != content:
-                st.session_state.current_state[key][i] = preserve_message_type(edited)
+            # Extract content based on message type
+            if isinstance(msg, (HumanMessage, AIMessage, SystemMessage)):
+                content = msg.content
+            elif isinstance(msg, dict):
+                content = msg.get('content', str(msg))
+            elif hasattr(msg, 'content'):
+                content = msg.content
+            else:
+                content = str(msg)
+
+            # Display the message content without any extra styling or borders
+            st.markdown(f"{content}")
+
+            # Optionally, add a horizontal line between messages
+            st.markdown("---")
 
 # Add caching for the state machine
 

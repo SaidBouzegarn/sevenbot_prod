@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 import subprocess
 import logging
 from langchain_core.documents import Document
-from langchain.tools import BaseTool
+from langchain.tools import BaseTool, Tool
 from jinja2 import Environment, FileSystemLoader
 import chromadb
 from chromadb import Settings
@@ -311,27 +311,53 @@ class GraphKnowledgeManager:
             logger.error(f"Error deleting database: {e}")
 
     def query_graph_tool(self) -> BaseTool:
-        return BaseTool(
+        """Create a tool for querying the graph database."""
+        return Tool(
             name="query_graph",
-            func=self.query_graph,
-            description="Query the Neo4j graph database"
+            description="Query the Neo4j graph database with natural language questions",
+            func=self.query_graph
         )
 
     def populate_knowledge_graph_tool(self) -> BaseTool:
-        return BaseTool.from_function(self.populate_knowledge_graph)
+        """Create a tool for populating the knowledge graph."""
+        return Tool(
+            name="populate_knowledge_graph",
+            description="Add new information to the knowledge graph from text",
+            func=self.populate_knowledge_graph
+        )
 
     def delete_node_or_relationship_tool(self) -> BaseTool:
-        return BaseTool.from_function(self.delete_node_or_relationship)
+        """Create a tool for deleting nodes or relationships."""
+        return Tool(
+            name="delete_node_or_relationship",
+            description="Delete a specific node or relationship from the graph",
+            func=self.delete_node_or_relationship
+        )
 
     def delete_database_tool(self) -> BaseTool:
-        return BaseTool.from_function(self.delete_database)
+        """Create a tool for deleting the entire database."""
+        return Tool(
+            name="delete_database",
+            description="Delete all nodes and relationships in the database",
+            func=self.delete_database
+        )
+
+    def vector_search_tool(self) -> BaseTool:
+        """Create a tool for vector similarity search."""
+        return Tool(
+            name="vector_search",
+            description="Search the knowledge graph using vector similarity",
+            func=self.vector_search
+        )
 
     def get_tools(self) -> List[BaseTool]:
+        """Get all available tools."""
         return [
             self.query_graph_tool(),
             self.populate_knowledge_graph_tool(),
             self.delete_node_or_relationship_tool(),
             self.delete_database_tool(),
+            self.vector_search_tool(),
         ]
 
     def _load_graph_system_prompt(self):
@@ -599,38 +625,25 @@ class GraphKnowledgeManager:
             logger.error(f"Error in vector search: {e}", exc_info=True)
             raise
 
-    def vector_search_tool(self) -> BaseTool:
-        """Create a tool for vector similarity search."""
-        return BaseTool(
-            name="vector_search",
-            func=self.vector_search,
-            description="Search the knowledge graph using vector similarity"
-        )
-
-    def get_tools(self) -> List[BaseTool]:
-        """Update get_tools to include vector search"""
-        return [
-            self.query_graph_tool(),
-            self.populate_knowledge_graph_tool(),
-            self.delete_node_or_relationship_tool(),
-            self.delete_database_tool(),
-            self.vector_search_tool(),  # Add vector search tool
-        ]
-
 
 
 # Test the code
 def main():
+    from langchain.agents import AgentExecutor, create_openai_tools_agent
+    from langchain_openai import ChatOpenAI
+    from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
+    
     prompt_dir = "Data/Prompts/level1/Datavor"
     name = "agent1"
-    gkm = None
     load_dotenv()
 
+    # Get environment variables
     aura_instance_id = os.getenv('AURA_INSTANCE_ID')
     aura_instance_name = os.getenv('AURA_INSTANCENAME')
     neo4j_uri = os.getenv('NEO4J_URI')
     neo4j_username = os.getenv('NEO4J_USERNAME')
     neo4j_password = os.getenv('NEO4J_PASSWORD')   
+
     # Initialize GraphKnowledgeManager
     gkm = GraphKnowledgeManager(
         name=name,
@@ -644,126 +657,66 @@ def main():
         neo4j_username=neo4j_username,
         neo4j_password=neo4j_password,
         allowed_nodes=[
-            "Company",
-            "Market_Segment",
-            "Product",
-            "Technology",
-            "Consumer_Group",
-            "Regulatory_Body",
-            "Market_Trend",
-            "Statistic",
-            "Timeline",
-            "Investment",
-            "Clinical_Trial",
-            "Patient_Outcome",
-            "Healthcare_Provider",
-            "Research_Institution",
-            "Geographic_Region",
-            "Cost",
-            "Regulation"
+            "Company", "Market_Segment", "Product", "Technology",
+            "Consumer_Group", "Regulatory_Body", "Market_Trend",
+            "Statistic", "Timeline", "Investment", "Clinical_Trial",
+            "Patient_Outcome", "Healthcare_Provider", "Research_Institution",
+            "Geographic_Region", "Cost", "Regulation"
         ],
         allowed_relationships=[
-            "AFFECTS",
-            "CORRELATES_WITH",
-            "COMPETES_WITH",
-            "REGULATES",
-            "COLLABORATES_WITH",
-            "SUPPLIES_TO",
-            "INVESTS_IN",
-            "RESEARCHES",
-            "OPERATES_IN",
-            "GROWS_BY",
-            "COMPLIES_WITH",
-            "INTEGRATES_WITH",
-            "RESULTS_IN",
-            "BELONGS_TO",
-            "PROVIDES_SERVICE_TO",
-            "IMPLEMENTS"
+            "AFFECTS", "CORRELATES_WITH", "COMPETES_WITH", "REGULATES",
+            "COLLABORATES_WITH", "SUPPLIES_TO", "INVESTS_IN", "RESEARCHES",
+            "OPERATES_IN", "GROWS_BY", "COMPLIES_WITH", "INTEGRATES_WITH",
+            "RESULTS_IN", "BELONGS_TO", "PROVIDES_SERVICE_TO", "IMPLEMENTS"
         ],
-        node_properties = True,
-        relationship_properties = True,
+        node_properties=True,
+        relationship_properties=True,
         chain_verbose=True
     )
+
+    # Initialize LangChain components
+    llm = ChatOpenAI(temperature=0.2, model="gpt-4")
     
-    # Delete existing database contents before populating
-    #gkm.delete_database()
-    logger.info("Cleared existing database contents")
+    # Create simple prompt template
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", "You are an AI assistant that uses tools to interact with a knowledge graph."),
+        ("human", "{input}"),
+        ("human", "Assistant: Let me help you with that. {agent_scratchpad}")
+
+    ])
+
+    # Create tools list
+    tools = gkm.get_tools()
+
+    # Create agent
+    agent = create_openai_tools_agent(llm, tools, prompt)
     
-    # Populate the knowledge graph with insights
-    insights = [
-        "PEPFAR, started in 2003, has saved over 25 million lives through antiretroviral treatments.",
-        "Dr. Emily Kainne Dokubo, working for PEPFAR, emphasizes partnerships in addressing disparities in pediatric HIV treatment.",
-        """ German MedTech Industry Under Pressure, But Industry Remains Job Driver
-        Oktober 25, 2024BVMed Autumn SurveyGerman MedT ech Industry Under Pressure, But Industry RemainsJob DriverThe member companies of the Federal Association of Medical Technology (BVMed) only expect a sales increase of 1.2percent in Germany for 2024. This is a dramatic disadvantage compared to the previous year's figure of 4.8 percent.The expected global sales development is significantly better than the domestic development, with an increase of 3.5percent. These are the results of the BVMed autumn survey, carried out by managing director and board member Dr.Marc-Pierre Möll presented it at the annual press conference of the MedTech industry association in Berlin. Due to theongoing cost increases, only 10 percent of BVMed members expect profits to increase this year compared to theprevious year. The result: investments in Germany are declining. BVMed’s innovation climate index remains at a lowpoint. Nevertheless, the industry, which represents 265,000 jobs in Germany, remains a job driver. 
-        “Germany as a medical technology location continues to become significantly less attractive. One reason is the rapidlyincreasing costs in Germany - for example due to high energy prices and personnel costs, but above all also due to excessivebureaucracy and regulation," explains BVMed managing director Dr. Marc-Pierre Möll. The MedTech companies are primarilydemanding from politicians a consistent reduction in bureaucracy through a moratorium on burdens, the further developmentand improvement of the MDR and a MedTech strategy in order to strengthen Germany as a location and make it resilient.Rising costs, declining investmentsAccording to the BVMed survey, the most important reason for the tense business situation is the rapidly increasing costs in
-        25/10/2024, 11:35German MedTech Industry Under Pressure, But Industry Remains Job Driver
-        Page 2 of 5https://medtechmediaeurope.com/News/Archiv/11414/German-MedTech-Industry-Under-Pressure-But-Industry-Remains-Job-Driver
-        Germany. 78 percent of the MedTech companies surveyed complain about increasing bureaucratic effort. 72 percent citeincreased personnel costs as the biggest problem. 66 percent of companies each cite the increasing costs for logistics andtransport as well as the increased certification costs due to the MDR implementation as the biggest hurdle.The increasing pressure on the industry's profit situation is increasingly having an impact on investments in Germany. 30percent of the BVMed companies surveyed are reducing their investments compared to the previous year. This value has beenrising continuously for years and shows that the attractiveness of the location is suffering. A third of the companies surveyedare shifting investments abroad, including 16 percent to the USA and 13 percent to other EU countries.Sustainability-related activities are becoming increasingly important in the MedTech industry. 65 percent of the BVMedmembers surveyed stated that they had created and maintained sustainable working conditions. These include occupationalsafety measures, the promotion of diversity and equal wages. 62 percent stated that they had established activities to reduceemissions and conserve resources in the production environment, for example to reduce water consumption, increase energyefficiency or make better use of renewable energies.Weak point regulatory systemThe days when the European medical device regulatory system was superior to the US FDA system are long gone. The BVMedautumn survey in 2024 also shows this very clearly. A clear majority of 67 percent of companies prefer the FDA system.In the opinion of the participating MedTech companies, the MDR urgently needs to be further developed and improved. Aboveall, 83 percent of companies would like to see less bureaucracy. 65 percent expect predictable and clear deadlines, 57 percentexpect predictable costs.In addition to the major MDR construction site, BVMed members are also increasingly complaining about the lack ofconsistency in national and European regulations on environmental requirements and sustainability-related reportingobligations. 65 percent are explicitly in favor of avoiding duplicate reporting requirements. 64 percent are in favor of better EU-wide harmonization of regulations.The MedTech industry remains a job driverDespite the effects of the crisis and dramatically rising costs, the medical technology industry in Germany continues to createadditional jobs. 32 percent of the companies that took part in the BVMed autumn survey 2024 are increasing the number ofemployees compared to the previous year, and 42 percent are keeping the number of jobs stable.The career prospects for skilled workers in the MedTech industry continue to be excellent. 84 percent of companies see jobprospects as remaining good or better. The search is primarily for engineers (34 percent), commercial apprentices and medicaltechnicians (29 percent each), nursing staff (25 percent), computer scientists and data scientists (23 percent) and naturalscientists (20 percent).The BVMed companies in Germany are looking for personnel in all areas, but especially in sales. 69 percent mention this area.This is followed by production (32 percent), marketing and regulatory affairs (31 percent each) as well as research anddevelopment (24 percent) and materials management and logistics (23 percent).The shortage of skilled workers is also clearly noticeable in medical technology. Almost half of the companies (47 percent) saythat they have problems filling vacancies in sales. The values are also high for the areas of production (24 percent), regulatoryaffairs (22 percent) and quality management and marketing (17 percent each).Strengthen Germany as a location71 percent of the MedTech companies surveyed cited good infrastructure, such as transport routes, as well as well-trainedspecialists (68 percent) as Germany's major strengths. This is followed by a greater distance than the strengths mentioned bythe high level of care for patients (40 percent) and well-trained scientists and engineers (34 percent).What needs to be addressed by politicians in order to strengthen Germany as a medical technology location? According to theBVMed autumn survey in 2024, at 76 percent, the first priority among health policy demands is the demand for a reduction inbureaucracy through a moratorium on burdens for MedTech companies. At the top of the priority list are the further
-        25/10/2024, 11:35German MedTech Industry Under Pressure, But Industry Remains Job Driver
-        Page 3 of 5https://medtechmediaeurope.com/News/Archiv/11414/German-MedTech-Industry-Under-Pressure-But-Industry-Remains-Job-Driver
-    development and improvement of the MDR system as well as a MedTech strategy to strengthen Germany as a location andmake it resilient (30 percent each).Innovation climate at its lowest pointOn a scale from 0 (very bad) to 10 (very good), companies rate the innovation climate for medical technology in Germany as anaverage of 3.6. This is only a slight improvement from the absolute low recorded last year.The companies consider cardiology (31 percent), oncology (30 percent), diagnostics (21 percent) and neurology (20 percent)to be the most innovative research areas.About the BVMed autumn survey:BVMed conducted a comprehensive online survey among its member companies in August and September 2024.Of the 216 regular BVMed members, 127 companies took part, including all major manufacturers of medical devices fromGermany and the USA.80 percent of participants in the BVMed survey were manufacturers, 19 percent were trading companies, 13 percent each weresuppliers, medical aid service providers and home care providers, and 3 percent each were DiGA manufacturers andsoftware/data service companies.Of the companies that took part in the survey, 67 percent have their headquarters in Germany, 13 percent in the USA and 17percent in other European countries.The detailed results of the BVMed autumn survey can be accessed at www.bvmed.de/herbstumfrage2024 (German languageonly).Source: BVMed e.V. / machine translation "    
-    """]
-    #gkm.populate_knowledge_graph(insights, batch_size=25)
-    
-    # Add verification queries
-    print("\nVerifying graph contents:")
-    
-    # Check all nodes and their properties
-    nodes_query = """
-    MATCH (n)
-    RETURN DISTINCT labels(n) as labels, properties(n) as properties
+    # Create agent executor
+    agent_executor = AgentExecutor(
+        agent=agent,
+        tools=tools,
+        verbose=True
+    )
+
+    # Test single query
+    test_query = "What are the main challenges facing the German MedTech industry?"
+    print(f"\nTesting query: {test_query}")
+    try:
+        response = agent_executor.invoke({"input": test_query, "agent_scratchpad": "    "})
+        print(f"Response: {response['output']}")
+    except Exception as e:
+        print(f"Error processing query: {e}")
+
+    test_text = """put this knowledge into the graph: the German MedTech industry is facing challenges in the areas of regulation, reimbursement, and market access. The industry is also facing challenges in the areas of regulation, reimbursement, and market access.
+    the main challenges are with the following companies and regulatory bodies:
     """
-    nodes = gkm.neo4j_graph.query(nodes_query)
-    print("\nAll nodes and their properties:")
-    for node in nodes:
-        print(f"Labels: {node['labels']}")
-        print(f"Properties: {node['properties']}\n")
-    
-    # Check all relationships
-    rels_query = """
-    MATCH ()-[r]->()
-    RETURN DISTINCT type(r) as type, properties(r) as properties
-    """
-    relationships = gkm.neo4j_graph.query(rels_query)
-    print("\nAll relationships and their properties:")
-    for rel in relationships:
-        print(f"Type: {rel['type']}")
-        print(f"Properties: {rel['properties']}\n")
-
-
-    # Sample specific PEPFAR-related query
-    pepfar_query = """
-    MATCH (n)
-    WHERE n.name CONTAINS 'PEPFAR' OR toLower(n.name) CONTAINS 'pepfar'
-    RETURN n.name, properties(n) as properties
-    """
-    pepfar_nodes = gkm.neo4j_graph.query(pepfar_query)
-    print("\nPEPFAR-related nodes:")
-    for node in pepfar_nodes:
-        print(f"Name: {node['n.name']}")
-        print(f"Properties: {node['properties']}")
-
-    # Query the graph database with qa chain
-    result = gkm.query_graph("What are the main challenges facing the German MedTech industry?")
-    #print(f"Answer from graph DB: {result}")
-
-    # Test decompose_user_query
-    print("\nTesting query decomposition:")
-    complex_query = "What companies are investing in medical technology in Germany and how are they affected by regulatory changes?"
-    sub_queries = gkm.decompose_user_query(complex_query)
-    print(f"Original query: {complex_query}")
-    print("Decomposed into:")
-    for i, query in enumerate(sub_queries, 1):
-        print(f"{i}. {query}")
-
-    # Test vector search
-    print("\nTesting vector search:")
-    search_query = "Find companies investing in medical technology in Germany"
-    vector_results = gkm.vector_search(search_query, k=2)
-   
-    # After populating the graph
-
-
+    print(f"\nTesting graph population with new text: {test_text}")
+    try:
+        response = agent_executor.invoke({"input": test_text, "agent_scratchpad": "    "})
+        print(f"Response: {response['output']}")
+    except Exception as e:
+        print(f"Error processing query: {e}")
+        
 if __name__ == "__main__":
     main()
 

@@ -108,12 +108,6 @@ class BaseAgent:
         })
         return message
 
-    def create_message(self, content: str, agent_name: str = None, type: Literal["human", "ai"] = "human") -> AIMessage:
-        """Dynamically create a new message class for a specific agent."""
-        if agent_name is None:
-            agent_name = self.name
-
-        return HumanMessage(content=content, type = type, name=f"{agent_name}", additional_kwargs={"agent_name": agent_name, "timestamp": datetime.now().isoformat()})
 
     def _create_graph(self) -> StateGraph:
         raise NotImplementedError("Subclasses must implement this method")
