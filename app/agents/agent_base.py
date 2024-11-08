@@ -31,9 +31,29 @@ from pathlib import Path
 
 set_llm_cache(InMemoryCache())
 
+# Update the path resolution to be relative to the current file
+current_dir = Path(__file__).resolve().parent
+project_root = current_dir.parent.parent
+llm_models_path = project_root / "app" / "Data" / "llm_models.json"
+
 # Load the LLM models from the JSON file
-with open(Path("Data/llm_models.json"), "r") as f:
-    LLM_MODELS = json.load(f)
+try:
+    with open(llm_models_path, "r") as f:
+        LLM_MODELS = json.load(f)
+except FileNotFoundError:
+    # Provide default model lists if file is not found
+    LLM_MODELS = {
+        "OPENAI_MODELS": ["gpt-4", "gpt-3.5-turbo"],
+        "MISTRAL_MODELS": ["mistral-tiny", "mistral-small", "mistral-medium"],
+        "COHERE_MODELS": ["command", "command-light"],
+        "GROQ_MODELS": ["mixtral-8x7b-32768", "llama2-70b-4096"],
+        "VERTEXAI_MODELS": ["gemini-pro"],
+        "OLLAMA_MODELS": ["llama2", "mistral"],
+        "NVIDIA_MODELS": ["mixtral-8x7b"],
+        "ANTHROPIC_MODELS": ["claude-3-opus-20240229", "claude-3-sonnet-20240229"],
+        "FIREWORKS_MODELS": ["llama-v2-7b", "llama-v2-13b"]
+    }
+    print(f"Warning: Could not find {llm_models_path}. Using default model lists.")
 
 # Use the imported model lists
 OPENAI_MODELS = LLM_MODELS["OPENAI_MODELS"]

@@ -32,6 +32,7 @@ from langchain.prompts.chat import ChatPromptTemplate
 from langchain.base_language import BaseLanguageModel
 import requests
 import re
+from pathlib import Path
 # Configure logging
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s',
@@ -634,7 +635,9 @@ def main():
     from langchain_openai import ChatOpenAI
     from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
     
-    prompt_dir = "Data/Prompts/level1/Datavor"
+    current_dir = Path(__file__).resolve().parent
+    project_root = current_dir.parent.parent
+    prompt_dir = project_root / "Data" / "Prompts" / "level1" / "Datavor"
     name = "agent1"
     load_dotenv()
 

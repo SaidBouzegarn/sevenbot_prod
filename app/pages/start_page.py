@@ -43,18 +43,6 @@ def read_pdf(uploaded_file) -> str:
         st.error(f"Full traceback:\n{traceback.format_exc()}")
         return ""
 
-def preserve_message_type(message: Union[str, dict, HumanMessage, AIMessage, SystemMessage]) -> Union[HumanMessage, AIMessage, SystemMessage]:
-    if isinstance(message, (HumanMessage, AIMessage, SystemMessage)):
-        message_type = type(message)
-        return message_type(content=message.content)
-    elif isinstance(message, dict):
-        if message.get('type') == 'human':
-            return HumanMessage(content=message.get('content', ''))
-        elif message.get('type') == 'ai':
-            return AIMessage(content=message.get('content', ''))
-        elif message.get('type') == 'system':
-            return SystemMessage(content=message.get('content', ''))
-    return HumanMessage(content=str(message))
 
 def display_conversation_flow(current_state: dict):
     st.markdown("### Conversation Flow")
@@ -102,11 +90,13 @@ def display_conversation_flow(current_state: dict):
 def add_start_page_css():
     st.markdown("""
         <style>
+        /* Existing CSS */
+
         /* Compact control panel */
         .control-panel {
             display: flex;
             flex-direction: row;
-            justify-content: space-between;
+            justify-content: center; /* Center the buttons */
             align-items: center;
             padding: 10px;
             margin-bottom: 10px;
@@ -114,76 +104,38 @@ def add_start_page_css():
             border-radius: 10px;
         }
 
-        /* Action buttons container - compact */
-        .action-buttons {
-            display: flex;
-            flex-direction: column;
-            gap: 5px;
-            z-index: 1000;
-            padding: 5px;
-        }
-        
-        /* State selector container - compact */
-        .state-selector {
-            flex-grow: 1;
-            margin-right: 10px;
-            padding: 5px;
-        }
-        
-        /* Button styling - compact */
+        /* Existing button styles */
         .stButton button {
-            width: 100px;  /* Reduced width */
-            padding: 0.25rem 0.5rem;  /* Reduced padding */
-        }
-
-        /* New button styles */
-        .quit-button {
-            background-color: grey;
+            background: linear-gradient(120deg, #000000, #1e3a8a);
             color: white;
-        }
-        
-        .delete-button {
-            background-color: red;
-            color: white;
-        }
-
-        /* Column layout */
-        .state-columns {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 20px;
-            padding: 20px;
-            height: calc(100vh - 200px);
-            margin-top: 20px;
-        }
-        
-        .state-column {
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 10px;
-            padding: 15px;
-            height: 100%;
-            border: 1px solid rgba(0, 0, 0, 0.1);
-            overflow-y: auto;
-            backdrop-filter: blur(5px);
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        }
-        
-        /* Multiselect styling */
-        .stMultiSelect {
-            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            padding: 0.6rem 1.2rem !important;    /* Adjusted padding for buttons */
             border-radius: 5px;
-            padding: 10px;
-        }
-        
-        /* Column headers */
-        .column-header {
-            font-size: 1.2rem;
             font-weight: 600;
-            margin-bottom: 15px;
-            padding-bottom: 10px;
-            border-bottom: 2px solid rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease;
+            width: 140px !important;              /* Adjusted width to accommodate three buttons */
+            margin: 0 5px !important;             /* Reduce space between buttons */
+            font-size: 0.8rem !important;         /* Optional: reduce font size */
             text-align: center;
         }
+
+        /* New styles for control-panel buttons to make them 20% smaller */
+        .control-panel > div.stButton > button {
+            width: 160px !important;              /* 20% smaller than 200px */
+            padding: 0.6rem 1.2rem !important;    /* 20% smaller padding */
+            margin: 0 5px !important;             /* Reduce space between buttons */
+            font-size: 0.8rem !important;         /* Optional: reduce font size */
+        }
+
+        /* Optional: Adjust spacing within the control panel */
+        .control-panel > div.stButton {
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+
+        /* Additional existing styles */
+        /* ... (other existing styles) ... */
+
         </style>
     """, unsafe_allow_html=True)
 
@@ -248,11 +200,12 @@ def render_upload_section():
     st.markdown('</div>', unsafe_allow_html=True)
 
 def render_conversation_state():
-    # Wrap the buttons in a control panel at the top
+    # Wrap the buttons in a control panel at the top using HTML
     st.markdown('<div class="control-panel">', unsafe_allow_html=True)
 
-    # Place buttons horizontally and centered
-    col1, col2, col3 = st.columns([1, 1, 1])
+    # Render the Continue, Retry, and Reset buttons
+    col1, col2, col3 = st.columns(3, gap="small")
+
     with col1:
         if st.button("Continue", key="btn_continue"):
             handle_continue()
@@ -310,7 +263,7 @@ def render_conversation_messages(key, only_content=False):
 def get_shared_state_machine(interrupt_before: bool = True):
     """Create a single StateMachine instance shared across all sessions"""
     logger.info(f"Creating new shared StateMachine instance with interrupt_before={interrupt_before}")
-    prompts_dir = os.path.join("Data", "Prompts")
+    prompts_dir = os.path.join("app", "Data", "Prompts")
     return StateMachines(str(prompts_dir).strip(), interrupt_before)
 
 def initialize_state_machine():

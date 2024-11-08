@@ -383,7 +383,7 @@ def main():
         'username': 'Anas.abdoun@gmail.com',
         'password': 'Kolxw007',
         'crawl': True,
-        'max_pages': 5  # Limit for testing
+        'max_pages': 3  # Limit for testing
     }
     
     # Initialize scraper
@@ -401,7 +401,7 @@ def main():
         print(f"URL: {url}")
         print(f"Classification: {article.classification}")
         print(f"Title: {article.title[:100]}..." if hasattr(article, 'title') else "No title")
-        print(f"Content length: {len(article.content)} characters" if hasattr(article, 'content') else "No content")
+        print(f"Content length: {len(article.body)} characters" if hasattr(article, 'body') else "No article body")
         
 
 

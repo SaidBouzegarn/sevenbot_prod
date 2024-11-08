@@ -1,5 +1,5 @@
 # Ignore logs folder
-logs/
+app/logs/
 
 # Ignore .env file
 .env
@@ -7,7 +7,7 @@ logs/
 # Ignore virtual environment folder
 venv/
 
-data/
+app/data/
 # Python-specific ignores
 __pycache__/
 *.py[cod]

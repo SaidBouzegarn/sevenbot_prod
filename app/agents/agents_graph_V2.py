@@ -38,21 +38,6 @@ except:
     from agent_base import BaseAgent    
 
 
-# Set the logging level for the SageMaker SDK to WARNING or higher
-def setup_logging():
-    log_filename = f"logs/agent_graph_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        filename=log_filename,
-        filemode='w'
-    )
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    console_handler.setFormatter(formatter)
-    logging.getLogger('').addHandler(console_handler)
-    return logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -1015,7 +1000,7 @@ if __name__ == "__main__":
 
     logger.info("About to create StateMachines instance")
     try:
-        state_machines = StateMachines("Data/Prompts")
+        state_machines = StateMachines("app/Data/Prompts")
         logger.info("StateMachines instance created successfully")
     except Exception as e:
         logger.error(f"Error creating StateMachines instance: {str(e)}", exc_info=True)
