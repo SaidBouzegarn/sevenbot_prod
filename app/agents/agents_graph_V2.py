@@ -113,7 +113,7 @@ class Level1Agent(BaseAgent):
         if mode == "research":
             return HumanMessage(content=f"""{agent_name} message  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} -
                                 
-                                 researching information, will respond after research is complete: {content}""")
+                                 researching information {content}, will respond after research is complete""")
         else:
             return HumanMessage(content=f"""{agent_name} message  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - 
                                 
@@ -416,7 +416,7 @@ class Level3Agent(BaseAgent):
         if mode == "research_information":
             return HumanMessage(content=f"""{agent_name} message  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} -
                                 
-                                researching information, will respond after research is complete: {content}""")
+                                researching information : {content}, will respond after research is complete""")
         elif mode == "write_to_digest":
             return HumanMessage(content=f"""{agent_name} message  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - 
                                 
@@ -571,9 +571,10 @@ class StateMachines():
             return SqliteSaver(conn=sqlite3.connect(conn_string, check_same_thread=False))
         SqliteSaver.from_conn_stringx=classmethod(from_conn_stringx)
 
-        from dotenv import load_dotenv
-        load_dotenv()
-        self.memory = SqliteSaver.from_conn_stringx(":memory:")
+        self.db_path = os.path.join(os.path.dirname(__file__), '..', 'Data', 'db' 'agents.db')
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        
+        self.memory = SqliteSaver.from_conn_stringx(self.db_path)
         self.prompt_dir = prompt_dir
         self.final_graph , self.unified_state_schema = self._create_agents_graph()
         self.config = {

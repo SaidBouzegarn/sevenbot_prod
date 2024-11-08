@@ -8,6 +8,8 @@ app/logs/
 venv/
 
 app/data/
+
+.streamlit/secrets.toml
 # Python-specific ignores
 __pycache__/
 *.py[cod]
