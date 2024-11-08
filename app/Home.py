@@ -95,16 +95,14 @@ def check_password():
 
     def password_entered():
         """Checks whether a password entered by the user is correct."""
-        if st.session_state["username"] in st.secrets[
-            "passwords"
-        ] and hmac.compare_digest(
+        if st.session_state["username"] in st.secrets["passwords"] and hmac.compare_digest(
             st.session_state["password"],
             st.secrets.passwords[st.session_state["username"]],
         ):
             st.session_state["password_correct"] = True
-            st.session_state.page = "Start"  # Automatically route to Start page
+            st.session_state["username"] = st.session_state["username"]  # Ensure username is in session
             del st.session_state["password"]
-            del st.session_state["username"]
+            # After successful login, the user will navigate to the start page
         else:
             st.session_state["password_correct"] = False
 
@@ -116,7 +114,7 @@ def check_password():
     
     login_form()
     if "password_correct" in st.session_state:
-        st.error("😕 User not known or password incorrect")
+        st.error("User not known or password incorrect")
     return False
 
 # Streamlit app
@@ -134,7 +132,7 @@ if 'state_machine' not in st.session_state:
 # Modify the authentication check
 if DEBUG_MODE or check_password():
     # Remove the Home page and go directly to Start page
-    render_start_page()
+    render_start_page(username=st.session_state.username)
 
     # Hide Streamlit elements
     hide_streamlit_style = """

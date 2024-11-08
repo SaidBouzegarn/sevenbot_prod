@@ -934,11 +934,13 @@ class StateMachines():
     def get_graph_image(self, name):   
         Image.open(io.BytesIO(self.final_graph.get_graph().draw_mermaid_png())).save(f'{name}.png')
     
-    def start(self, initial_state):
+    def start(self, initial_state, thread_id):
         # Ensure recursion_limit is set before starting
         if "recursion_limit" not in self.config:
             self.config["recursion_limit"] = 50
-            
+        
+        self.config["thread_id"] = thread_id
+
         result = self.final_graph.invoke(initial_state, self.config)
         if result is None:
             values = self.final_graph.get_state(self.config).values
@@ -946,11 +948,12 @@ class StateMachines():
             return values[last_state]
         return result
     
-    def resume(self, new_state: dict):
+    def resume(self, new_state: dict, thread_id):
         # Ensure recursion_limit is set before resuming
         if "recursion_limit" not in self.config:
             self.config["recursion_limit"] = 50
-            
+        
+        self.config["thread_id"] = thread_id
         # Get the current state values
         current_state = self.final_graph.get_state(self.config).values
         # Update the current state with new values from new_state
