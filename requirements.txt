@@ -191,3 +191,8 @@ wrapt==1.16.0
 wsproto==1.2.0
 yarl==1.16.0
 zipp==3.20.2
+tenacity
+playwright
+playwright-stealth
+sqlite3
+dotenv

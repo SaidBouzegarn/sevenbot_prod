@@ -251,7 +251,7 @@ class GraphKnowledgeManager:
             logger.error(f"Error executing GraphCypherQAChain: {e}")
             return None
 
-    def populate_knowledge_graph(self, texts: List[str], batch_size: int = 100):
+    async def populate_knowledge_graph(self, texts: List[str], batch_size: int = 100):
         self.graph_system_prompt = self._load_graph_system_prompt()
         graph_prompt = ChatPromptTemplate.from_template(self.graph_system_prompt)
 
@@ -265,13 +265,14 @@ class GraphKnowledgeManager:
                 node_properties=self.node_properties,
                 relationship_properties=self.relationship_properties,
                 ignore_tool_usage=self.ignore_tool_usage
+                
             )
 
         try:
             for i in range(0, len(texts), batch_size):
                 batch = texts[i:i+batch_size]
                 documents = [Document(page_content=text) for text in batch]
-                graph_documents = self.llm_transformer.convert_to_graph_documents(documents)
+                graph_documents = await self.llm_transformer.aconvert_to_graph_documents(documents)
                 
                 # Log the graph documents before adding them
                 logger.info(f"Converting batch {i//batch_size + 1}/{(len(texts) + batch_size - 1)//batch_size}")
@@ -286,7 +287,7 @@ class GraphKnowledgeManager:
                             if hasattr(node, 'id'):
                                 node.properties['name'] = node.id
                 
-                self.neo4j_graph.add_graph_documents(graph_documents)
+                self.neo4j_graph.add_graph_documents(graph_documents, include_source=True)
                 logger.info(f"Processed batch {i//batch_size + 1}/{(len(texts) + batch_size - 1)//batch_size}")
             self.neo4j_graph.refresh_schema()
         except Exception as e:

@@ -64,7 +64,7 @@ def pydantic_to_json(pydantic_obj):
     obj_dict = pydantic_obj.dict()
     # Use indent parameter to format the JSON output
     formatted_string = json.dumps(obj_dict, indent=4)
-    return formatted_string
+    return str(formatted_string)
 
 def keep_last_n(existing: List, updates: List) -> List:
     """Keep only the last n items from the combined list."""
@@ -127,9 +127,11 @@ class Level1Agent(BaseAgent):
             agent_name = self.name
         if mode == "research":
             return HumanMessage(content=f"""{agent_name} message  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} -
+                                
                                  researching information, will respond after research is complete: {content}""")
         else:
             return HumanMessage(content=f"""{agent_name} message  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - 
+                                
                                 {content}""")
     
     def level1_node(self, state):
@@ -428,12 +430,16 @@ class Level3Agent(BaseAgent):
 
         if mode == "research_information":
             return HumanMessage(content=f"""{agent_name} message  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} -
-                                 researching information, will respond after research is complete: {content}""")
+                                
+                                researching information, will respond after research is complete: {content}""")
         elif mode == "write_to_digest":
             return HumanMessage(content=f"""{agent_name} message  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - 
+                                
                                 writing to digest: {content}""")
+        
         elif mode == "communicate_with_directors" or mode == "communicate_with_executives":
             return HumanMessage(content=f"""{agent_name} message  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - 
+                                
                                 {content}""")
     
     def ceo_node(self, state) -> Dict[str, Any]:
