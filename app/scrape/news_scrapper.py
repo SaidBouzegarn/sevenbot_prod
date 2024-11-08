@@ -31,7 +31,7 @@ class NewsScrapper:
         self.max_pages = max_pages
         self.jinja_env = Environment(loader=FileSystemLoader(os.path.join(os.path.dirname(__file__), '..', 'Data', 'scrapping_prompts')))
         self.headless = True  # Set to False if you want to see the browser actions
-        self.db_path = os.path.join(os.path.dirname(__file__), '..', 'Data', 'db' 'news_scrapper.db')
+        self.db_path = os.path.join(os.path.dirname(__file__), '..', 'Data', 'dbs' 'news_scrapper.db')
 
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._initialize_database()

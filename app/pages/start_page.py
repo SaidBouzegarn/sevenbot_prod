@@ -37,7 +37,7 @@ logger = setup_logging()
 def initialize_database():
     """Ensures that the SQLite database and user_threads table exist."""
     try:
-        conn = sqlite3.connect('users_data.db')
+        conn = sqlite3.connect('app/Data/dbs/users_data.db')
         cursor = conn.cursor()
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS user_threads (
@@ -56,7 +56,7 @@ def initialize_database():
 def get_user_threads(username: str) -> List[tuple]:
     """Retrieves all thread_ids and their creation dates for a given user."""
     try:
-        conn = sqlite3.connect('users_data.db')
+        conn = sqlite3.connect('app/Data/dbs/users_data.db')
         cursor = conn.cursor()
         cursor.execute("""
             SELECT thread_id, timestamp FROM user_threads
@@ -76,7 +76,7 @@ def add_new_thread(username: str, thread_id: str):
         raise ValueError("Username and thread_id must be provided")
         
     try:
-        conn = sqlite3.connect('users_data.db')
+        conn = sqlite3.connect('app/Data/dbs/users_data.db')
         cursor = conn.cursor()
         
         # Check if thread_id already exists

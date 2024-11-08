@@ -571,7 +571,7 @@ class StateMachines():
             return SqliteSaver(conn=sqlite3.connect(conn_string, check_same_thread=False))
         SqliteSaver.from_conn_stringx=classmethod(from_conn_stringx)
 
-        self.db_path = os.path.join(os.path.dirname(__file__), '..', 'Data', 'db' 'agents.db')
+        self.db_path = os.path.join(os.path.dirname(__file__), '..', 'Data', 'dbs', 'agents.db')
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         
         self.memory = SqliteSaver.from_conn_stringx(self.db_path)
