@@ -14,24 +14,46 @@ def extract_content(page, output_type="full_html"):
         # Wait for the page to fully load (ensure all resources are loaded)
         page.wait_for_load_state('networkidle')
         base_url = page.url
-        base_netloc = urlparse(base_url).netloc.lower().lstrip('www.')
+
+        parsed_base_url = urlparse(base_url)
+        base_netloc = parsed_base_url.netloc.lower()
+        # Remove 'www.' if present
+        if base_netloc.startswith('www.'):
+            base_netloc = base_netloc[4:]
 
         # Evaluate JavaScript to get all links
         links = page.evaluate('''() => {
             const anchors = Array.from(document.querySelectorAll('a[href]'));
             return anchors.map(anchor => ({
                 text: anchor.textContent.trim(),
-                href: anchor.href
+                href: anchor.getAttribute('href')
             }));
         }''')
+        print(f'extracted {len(links)} links ')
 
         # Filter internal links
         internal_links = []
         for link in links:
-            link_netloc = urlparse(link['href']).netloc.lower().lstrip('www.')
-            if link_netloc == base_netloc:
-                internal_links.append(link)
+            # Ensure href is not None or empty
+            if not link['href']:
+                continue
 
+            absolute_href = urljoin(base_url, link['href'])
+            parsed_url = urlparse(absolute_href)
+            link_scheme = parsed_url.scheme.lower()
+            link_netloc = parsed_url.netloc.lower()
+
+            # Remove 'www.' if present
+            if link_netloc.startswith('www.'):
+                link_netloc = link_netloc[4:]
+            
+            # Filter only http and https links
+            if link_scheme in ['http', 'https']:
+                if link_netloc == base_netloc:
+                    link['href'] = absolute_href  # Update href to the absolute URL
+                    internal_links.append(link)
+
+        print(f'Found {len(internal_links)} internal links.')
         return internal_links
     # Extract full HTML if requested
     if output_type == 'full_html':

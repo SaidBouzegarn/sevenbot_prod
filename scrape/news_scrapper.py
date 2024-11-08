@@ -10,6 +10,8 @@ from collections import deque
 from urllib.parse import urlparse
 import traceback
 import dotenv
+import time
+import random
 
 dotenv.load_dotenv()
 
@@ -112,12 +114,14 @@ class NewsScrapper:
     def get_login_url(self):
         """Find and return the login URL for the website."""
         links = extract_content(self.page, output_type="links")
+        html_content = extract_content(self.page, output_type="full_html")
         prompt = self.jinja_env.get_template('get_login_url_prompt.j2').render(
-            links=links
+            #links=links,
+            links = html_content
         )
 
         response = detect_login_url(prompt)
-
+        print(response)
         return response.login_url
     
     def get_login_selectors(self):
@@ -129,11 +133,14 @@ class NewsScrapper:
         # Clean HTML for login detection
         cleaned_html = clean_html_for_login_detection(page_content)
         # Generate prompt for login selectors
+        print(f"the given html for form detection is {cleaned_html}")
+
         prompt = self.jinja_env.get_template('login_selectors_prompt.j2').render(
             html=cleaned_html
         )
         # Detect login selectors
         response = detect_selectors(prompt)
+        print(response)
         print(f"found selectors: username: {response.username_selector}, password: {response.password_selector}, submit_button: {response.submit_button_selector}")
         return response.username_selector, response.password_selector, response.submit_button_selector
 
@@ -172,18 +179,25 @@ class NewsScrapper:
             self.context.add_cookies(self.session_cookies)
         
         responses = []
+        time.sleep(random.uniform(0, 2))
+        self.page.goto(self.website_url)
+        self.page.wait_for_load_state('networkidle')  # Wait for the page to be fully loaded
         urls = extract_content(self.page, output_type="links")
-        print(f"found {len(urls)} urls")
+        print(f"found links {(urls)} ")
         prompt = self.jinja_env.get_template('articles_links_prompt.j2').render(
             urls=urls
         )
-        lucky_urls = select_likely_URLS(prompt).likely_urls
+        response = select_likely_URLS(prompt)
+        print(response)
+
+        lucky_urls = response.likely_urls
+        url_list = [link['href'] for link in urls]
 
         # Filter lucky_urls to only include URLs that exist in 'urls'
         if isinstance(lucky_urls, list):
-            n_lucky_urls = [url for url in lucky_urls if url in urls]
+            n_lucky_urls = [url for url in lucky_urls if url in url_list]
         else:
-            n_lucky_urls = [lucky_urls] if lucky_urls in urls else []
+            n_lucky_urls = [lucky_urls] if lucky_urls in url_list else []
 
         print(f"found {len(n_lucky_urls)} new urls")
         print(f"llm hallucinated {len(lucky_urls) - len(n_lucky_urls)} urls")
@@ -192,12 +206,14 @@ class NewsScrapper:
         to_visit.extend(n_lucky_urls)
 
         # Navigate to the target URL while staying logged in
+        self.page.wait_for_load_state('networkidle')  # Wait for the page to be fully loaded
         structured_content = extract_content(self.page, output_type="formatted_text")
         prompt = self.jinja_env.get_template('classification_extraction_prompt.j2').render(
             cleaned_html=structured_content
         )
         try: 
             response = classify_and_extract_news_article(prompt)
+            print(response)
             responses.append((self.website_url, response))
         except Exception as e: 
             print(f"Warning: Could not classify and extract news article. Full error:\n{traceback.format_exc()}")
@@ -208,25 +224,30 @@ class NewsScrapper:
         
         newly_visited_urls = [(self.website_url, response.classification if response else None)]
 
-        while to_visit and len(newly_visited_urls) < self.max_pages:
+        while to_visit and len(responses) < self.max_pages:
             current_url = to_visit.popleft()
-
+            print(f"crawling url {current_url}")
             if current_url in self.visited_urls:
                 continue
 
             self.page.goto(current_url)
 
             try:
+                self.page.wait_for_load_state('networkidle')  # Wait for the page to be fully loaded
+
                 html_content = extract_content(self.page, output_type="formatted_text")
                 prompt = self.jinja_env.get_template('classification_extraction_prompt.j2').render(
                     cleaned_html=html_content
                 )
                 response = classify_and_extract_news_article(prompt)
+                print(response)
                 if response: 
                     responses.append((current_url, response))
                 newly_visited_urls.append((current_url, response.classification if response else None))
             except Exception as e: 
                 print(f"Warning: Could not classify and extract news article from {current_url}. Skipping... Full error:\n{traceback.format_exc()}")
+            
+            self.page.wait_for_load_state('networkidle')  # Wait for the page to be fully loaded
 
             new_links = extract_content(self.page, output_type="links")
             print(f"found {len(new_links)} new links")
@@ -234,7 +255,9 @@ class NewsScrapper:
                 urls=new_links
             )
             try: 
-                new_lucky_urls = select_likely_URLS(prompt).likely_urls
+                response = select_likely_URLS(prompt)
+                print(response)
+                new_lucky_urls = response.likely_urls
 
                 # Filter new_lucky_urls to only include URLs that exist in 'new_links'
                 if isinstance(new_lucky_urls, list):
@@ -294,6 +317,7 @@ class NewsScrapper:
             
             # Update the in-memory set
             self.visited_urls.update(set(url_tuples))
+            print("added visited urls to databse successfully")
         except sqlite3.Error as e:
             print(f"Database error: {e}")
         finally:
