@@ -12,7 +12,6 @@ import os
 from datetime import datetime
 import sqlite3
 import uuid
-import hmac
 
 # Set up logging
 def setup_logging():
@@ -224,8 +223,7 @@ def render_logo():
         </div>
     """, unsafe_allow_html=True)
 
-def render_start_page(username: str):
-    st.session_state.username = username
+def render_start_page():
     # Initialize the database
     initialize_database()
     
@@ -255,18 +253,18 @@ def render_main_layout():
     # Show current user and logout option
     col_user, col_logout = st.columns([3, 1])
     with col_user:
-        st.markdown(f"**Current User:** {st.session_state.username}")
+        st.markdown(f"**Current User:** {st.session_state.username_id}")
     with col_logout:
         if st.button("Logout"):
-            st.session_state.username = None
+            st.session_state.username_id = None
             st.rerun()
     
-    # Main layout columns
-    col1, col2, col3 = st.columns(3)
+    # Main layout columns - Previous conversations takes 1/3, New Simulation takes 2/3
+    col1, col2 = st.columns([1, 2])
     
     with col1:
         st.markdown("### Previous Conversations")
-        username = st.session_state.username  # Now we know this exists
+        username = st.session_state.username_id
         threads = get_user_threads(username)
         
         for thread_id, timestamp in threads:
@@ -279,25 +277,30 @@ def render_main_layout():
                     is_new_thread=False
                 )
     
-    with col2, col3:
+    with col2:
         st.markdown("### Start New Simulation")
-        uploaded_file = st.file_uploader("Upload PDF file", type=['pdf'])
+        uploaded_files = st.file_uploader("Upload PDF files", type=['pdf'], accept_multiple_files=True)
         
-        if uploaded_file:
-            content = read_pdf(uploaded_file)
-            if content:
+        if uploaded_files:
+            combined_content = ""
+            for uploaded_file in uploaded_files:
+                content = read_pdf(uploaded_file)
+                if content:
+                    combined_content += f"\n\nFile: {uploaded_file.name}\n{content}"
+            
+            if combined_content:
                 if st.button("Start New Simulation"):
                     try:
                         # Generate new thread ID
                         new_thread_id = str(uuid.uuid4())
                         
                         # Store in database first
-                        add_new_thread(st.session_state.username, new_thread_id)
-                        logger.info(f"Created new thread {new_thread_id} for user {st.session_state.username}")
+                        add_new_thread(st.session_state.username_id, new_thread_id)
+                        logger.info(f"Created new thread {new_thread_id} for user {st.session_state.username_id}")
                         
-                        # Then initialize conversation
+                        # Then initialize conversation with combined content
                         initialize_conversation(
-                            content=content,
+                            content=combined_content,
                             interrupt_before=True,
                             thread_id=new_thread_id,
                             is_new_thread=True

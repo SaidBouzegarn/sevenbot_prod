@@ -2,8 +2,12 @@ from playwright.sync_api import sync_playwright
 from playwright_stealth import stealth_sync
 from jinja2 import Environment, FileSystemLoader
 import os
-from utils import extract_content, clean_html_for_login_detection
-from llm_utils import select_likely_URLS, detect_login_url, detect_selectors, classify_and_extract_news_article
+try : 
+    from utils import extract_content, clean_html_for_login_detection
+    from llm_utils import select_likely_URLS, detect_login_url, detect_selectors, classify_and_extract_news_article
+except : 
+    from .utils import extract_content, clean_html_for_login_detection
+    from .llm_utils import select_likely_URLS, detect_login_url, detect_selectors, classify_and_extract_news_article
 import sqlite3
 from datetime import datetime
 from collections import deque
@@ -32,7 +36,7 @@ class NewsScrapper:
         self.jinja_env = Environment(loader=FileSystemLoader(os.path.join(os.path.dirname(__file__), '..', 'Data', 'scrapping_prompts')))
         self.headless = True  # Set to False if you want to see the browser actions
         self.db_path = os.path.join(os.path.dirname(__file__), '..', 'Data', 'dbs', 'news_scrapper.db')
-
+        self.logged_in = False
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._initialize_database()
         self._get_stored_domain_info()
@@ -177,11 +181,12 @@ class NewsScrapper:
         """Verify that the session is still active."""
         # Store cookies after successful login
         self.session_cookies = self.context.cookies()
-        
         # Basic session check
         if not self.session_cookies:
             raise Exception("No session cookies found after login")
-            
+        else: 
+            self.logged_in = True
+                
     def scrape(self):
         # Only restore cookies if they exist and are valid
         if hasattr(self, 'session_cookies') and self.session_cookies:
