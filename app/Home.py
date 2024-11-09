@@ -1,11 +1,11 @@
 import streamlit as st
 import os
 from dotenv import load_dotenv
-from pages.start_page import render_start_page
+from pages.Simulation import render_start_page
 import PyPDF2
 from pathlib import Path
 import hmac
-from pages.crawl_page import render_crawl_page
+from pages.CrawlandScrape import render_crawl_page
 
 # Set page config first, before any other Streamlit commands
 st.set_page_config(
@@ -29,7 +29,7 @@ if 'username_id' not in st.session_state:
     st.session_state.username_id = None
 
 if 'password_correct' not in st.session_state:
-    st.session_state.password_correct = False
+    st.session_state.password_correct = None
 
 # Add CSS for the stylish landing page
 def add_custom_css():
@@ -125,7 +125,8 @@ def check_password():
     add_custom_css()
     
     login_form()
-    if "password_correct" in st.session_state:
+    # Only show error if a login attempt was made and failed
+    if st.session_state.password_correct is False:
         st.error("User not known or password incorrect")
     return False
 
