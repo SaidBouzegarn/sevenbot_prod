@@ -31,10 +31,11 @@ class NewsScrapper:
         self.max_pages = max_pages
         self.jinja_env = Environment(loader=FileSystemLoader(os.path.join(os.path.dirname(__file__), '..', 'Data', 'scrapping_prompts')))
         self.headless = True  # Set to False if you want to see the browser actions
-        self.db_path = os.path.join(os.path.dirname(__file__), '..', 'Data', 'dbs' 'news_scrapper.db')
+        self.db_path = os.path.join(os.path.dirname(__file__), '..', 'Data', 'dbs', 'news_scrapper.db')
 
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._initialize_database()
+        self._get_stored_domain_info()
 
         #delete the website url from the visited urls set, its only url we allow to be visited multiple times
         self.visited_urls = set(self.get_visited_urls()) - {self.website_url}
@@ -125,9 +126,17 @@ class NewsScrapper:
         return response.login_url
     
     def get_login_selectors(self):
-
         self.page.goto(self.login_url)
         self.page.wait_for_load_state('networkidle')
+        
+        # Take and save screenshot
+        screenshots_dir = os.path.join(os.path.dirname(__file__), '..', 'Data', 'screenshots')
+        os.makedirs(screenshots_dir, exist_ok=True)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        screenshot_path = os.path.join(screenshots_dir, f'login_page_{self.domain}_{timestamp}.png')
+        self.page.screenshot(path=screenshot_path)
+        print(f"Screenshot saved to: {screenshot_path}")
+        
         # Extract page content
         page_content = extract_content(self.page, output_type="full_html")
         # Clean HTML for login detection
@@ -359,22 +368,89 @@ class NewsScrapper:
             conn.close()
 
     def add_website(self):
-        """Add or update a website's credentials and selectors in the database."""
+        """Add or update a website's credentials and selectors in the database.
+        If the website exists, only update fields that are not already set."""
         conn = sqlite3.connect(self.db_path)
         c = conn.cursor()
-        c.execute('''INSERT OR REPLACE INTO websites 
-                    (url, login_url, username, password, 
-                        username_selector, password_selector, submit_button_selector)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                    (self.website_url, self.login_url, self.username, self.password,
-                    self.username_selector, self.password_selector, self.submit_button_selector))
-        conn.commit()
-        conn.close()
+        
+        # Extract base domain from website_url
+        base_domain = self._extract_domain(self.website_url)
+        
+        try:
+            # Check if website exists and get current values
+            c.execute('SELECT * FROM websites WHERE url = ?', (base_domain,))
+            existing = c.fetchone()
+            
+            if existing:
+                # Create dictionary of column names and their current values
+                columns = ['url', 'login_url', 'username', 'password', 
+                          'username_selector', 'password_selector', 'submit_button_selector']
+                current_values = dict(zip(columns, existing))
+                
+                # Only update values that are not None in self but are None or empty in database
+                updates = []
+                values = []
+                for col in columns[1:]:  # Skip URL as it's the primary key
+                    new_value = getattr(self, col.replace('_selector', '') if 'selector' in col else col)
+                    if new_value and not current_values[col]:
+                        updates.append(f"{col} = ?")
+                        values.append(new_value)
+                
+                if updates:
+                    query = f"UPDATE websites SET {', '.join(updates)} WHERE url = ?"
+                    values.append(base_domain)
+                    c.execute(query, values)
+            else:
+                # Insert new record
+                c.execute('''INSERT INTO websites 
+                            (url, login_url, username, password, 
+                             username_selector, password_selector, submit_button_selector)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                            (base_domain, self.login_url, self.username, self.password,
+                             self.username_selector, self.password_selector, self.submit_button_selector))
+            
+            conn.commit()
+        finally:
+            conn.close()
 
     def _extract_domain(self, url):
         """Extract domain from URL."""
         from urllib.parse import urlparse
         return urlparse(url).netloc
+
+    def _get_stored_domain_info(self):
+        """Fetch stored domain information from database."""
+        conn = sqlite3.connect(self.db_path)
+        c = conn.cursor()
+        try:
+            base_domain = self._extract_domain(self.website_url)
+            c.execute('SELECT * FROM websites WHERE url = ?', (base_domain,))
+            row = c.fetchone()
+            
+            if row:
+                # Map database columns to instance attributes
+                columns = ['url', 'login_url', 'username', 'password', 
+                          'username_selector', 'password_selector', 'submit_button_selector']
+                stored_values = dict(zip(columns, row))
+                
+                # Only update attributes that aren't already set
+                if not self.login_url and stored_values['login_url']:
+                    self.login_url = stored_values['login_url']
+                if not self.username and stored_values['username']:
+                    self.username = stored_values['username']
+                if not self.password and stored_values['password']:
+                    self.password = stored_values['password']
+                if not self.username_selector and stored_values['username_selector']:
+                    self.username_selector = stored_values['username_selector']
+                if not self.password_selector and stored_values['password_selector']:
+                    self.password_selector = stored_values['password_selector']
+                if not self.submit_button_selector and stored_values['submit_button_selector']:
+                    self.submit_button_selector = stored_values['submit_button_selector']
+                
+                return True
+            return False
+        finally:
+            conn.close()
 
 def main():
     # Test website configuration
@@ -382,7 +458,7 @@ def main():
         'website_url': 'https://www.jeuneafrique.com',
         'username': 'Anas.abdoun@gmail.com',
         'password': 'Kolxw007',
-        'crawl': True,
+        'crawl': False,
         'max_pages': 3  # Limit for testing
     }
     
