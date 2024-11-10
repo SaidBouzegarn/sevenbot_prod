@@ -19,6 +19,11 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
+# Key pair files
+*.key
+*.pem   
+SevenBlueBots.pem
+
 # IDE-specific ignores (optional, uncomment if needed)
 # .vscode/
 # .idea/
