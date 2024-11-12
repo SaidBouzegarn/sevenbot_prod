@@ -4,29 +4,14 @@ import json
 import logging
 from datetime import datetime
 import os
+from utils.logging_config import setup_cloudwatch_logging
 
-def setup_logging():
-    base_dir = Path(__file__).resolve().parent.parent
-    logs_dir = base_dir / "logs"
-    logs_dir.mkdir(exist_ok=True)
-    
-    log_file = logs_dir / f"prompts_page_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-    
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(log_file),
-            logging.StreamHandler()
-        ]
-    )
-    return logging.getLogger(__name__)
-
-logger = setup_logging()
+logger = setup_cloudwatch_logging('prompts_page')
 
 def get_all_agents():
     """Get all agent names from all levels"""
     try:
+        logger.info("Fetching all agents")
         prompts_dir = Path(__file__).resolve().parent.parent / "Data" / "Prompts"
         agents = set()
         
@@ -40,7 +25,7 @@ def get_all_agents():
         
         return sorted(list(agents))
     except Exception as e:
-        logger.error(f"Error getting agents: {e}")
+        logger.error(f"Error getting agents: {e}", exc_info=True)
         return []
 
 def get_agent_files(agent_name):
@@ -79,6 +64,7 @@ def read_file_content(file_path):
 def save_file_content(file_path, content):
     """Save content to file"""
     try:
+        logger.info(f"Saving content to {file_path}")
         with open(file_path, 'w', encoding='utf-8') as f:
             if file_path.suffix == '.json':
                 # Validate and format JSON before saving
@@ -86,12 +72,14 @@ def save_file_content(file_path, content):
                 f.write(json.dumps(json_content, indent=2))
             else:
                 f.write(content)
+        logger.info(f"Successfully saved content to {file_path}")
         return True
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON format: {e}", exc_info=True)
         st.error("Invalid JSON format")
         return False
     except Exception as e:
-        logger.error(f"Error saving file {file_path}: {e}")
+        logger.error(f"Error saving file {file_path}: {e}", exc_info=True)
         st.error(f"Error saving file: {str(e)}")
         return False
 
@@ -199,5 +187,4 @@ def render_prompts_page():
                     st.error("Please log in to make changes to the prompts.")
 
 if __name__ == "__main__":
-    pass
-    #render_prompts_page() 
+    render_prompts_page() 

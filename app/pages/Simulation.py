@@ -3,7 +3,7 @@ from agents.agents_graph_V2 import StateMachines
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 import PyPDF2
 import json
-from typing import Union, List
+from typing import Union, List, Dict, Any, Tuple
 import time
 from pathlib import Path
 import traceback
@@ -12,30 +12,17 @@ import os
 from datetime import datetime
 import sqlite3
 import uuid
+from utils.logging_config import setup_cloudwatch_logging
+import re
+import streamlit.components.v1 as components
 
 # Set up logging
-def setup_logging():
-    base_dir = Path(__file__).resolve().parent.parent
-    logs_dir = base_dir / "logs"
-    logs_dir.mkdir(exist_ok=True)
-    
-    log_file = logs_dir / f"app_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-    
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(log_file),
-            logging.StreamHandler()
-        ]
-    )
-    return logging.getLogger(__name__)
-
-logger = setup_logging()
+logger = setup_cloudwatch_logging('simulation_page')
 
 def initialize_database():
     """Ensures that the SQLite database and user_threads table exist."""
     try:
+        logger.info("Initializing database")
         conn = sqlite3.connect('app/Data/dbs/users_data.db')
         cursor = conn.cursor()
         cursor.execute("""
@@ -50,7 +37,7 @@ def initialize_database():
         conn.close()
         logger.info("Database initialized successfully.")
     except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
+        logger.error(f"Database initialization failed: {e}", exc_info=True)
 
 def get_user_threads(username: str) -> List[tuple]:
     """Retrieves all thread_ids and their creation dates for a given user."""
@@ -346,25 +333,85 @@ def render_conversation_state():
         else:
             st.info("No conversation elements available.")
 
+def format_message_content(content: str) -> str:
+    """
+    Uses regex to find and clean JSON-like content within strings by removing brackets,
+    quotes, and formatting with bullet points and new lines.
+
+    Adjustments:
+    - No empty line before the dict content.
+    - Adds an empty line between each element of the dict.
+    """
+    import re
+
+    # Pattern to find JSON-like structures: matches content between { and }
+    json_pattern = r'{([^{}]*?)}'
+
+    def clean_json_content(match):
+        json_content = match.group(1)
+        # Split by commas not within quotes
+        parts = re.split(r',\s*(?=(?:[^"]*"[^"]*")*[^"]*$)', json_content)
+
+        # Clean each key-value pair
+        cleaned_parts = []
+        for part in parts:
+            # Remove quotes and extra whitespace
+            cleaned = re.sub(r'"', '', part.strip())
+            # Replace ':' with ': ' for better readability
+            cleaned = re.sub(r'\s*:\s*', ': ', cleaned)
+            cleaned_parts.append(f"- {cleaned}")
+
+        # Join with double newlines between elements
+        return '\n' + '\n\n'.join(cleaned_parts)
+
+    # Replace JSON-like structures with cleaned format
+    # Ensure there's no extra empty line before the dict
+    cleaned_content = re.sub(json_pattern, clean_json_content, content)
+    return cleaned_content
+
 def render_conversation_messages(key, only_content=False):
     if key in st.session_state.current_state:
         messages = st.session_state.current_state[key]
         for i, msg in enumerate(messages):
-            # Extract content based on message type
+            # Extract the original content
             if isinstance(msg, (HumanMessage, AIMessage, SystemMessage)):
-                content = msg.content
+                original_content = msg.content
             elif isinstance(msg, dict):
-                content = msg.get('content', str(msg))
+                original_content = msg.get('content', str(msg))
             elif hasattr(msg, 'content'):
-                content = msg.content
+                original_content = msg.content
             else:
-                content = str(msg)
+                original_content = str(msg)
 
-            # Display the message content without any extra styling or borders
-            st.markdown(f"{content}")
+            # Format the content using regex
+            formatted_content = format_message_content(original_content)
 
-            # Optionally, add a horizontal line between messages
-            st.markdown("---")
+            # Create a unique key for the text area
+            key_prefix = f"{key}_{i}"
+
+            # Calculate the height based on the content
+            textarea_height = get_text_area_height(formatted_content)
+
+            # Display the editable text area with adjusted height
+            edited_content = st.text_area(
+                label="",
+                value=formatted_content,
+                key=f"{key_prefix}_edit",
+                height=textarea_height
+            )
+
+            # If the content has changed, update the message
+            if edited_content != formatted_content:
+                # Update the message content in the session state
+                if hasattr(msg, 'content'):
+                    msg.content = edited_content
+                elif isinstance(msg, dict):
+                    msg['content'] = edited_content
+                # Update the message in the session state
+                st.session_state.current_state[key][i] = msg
+
+            # Reduce spacing between messages
+            st.markdown("<div style='margin-bottom: -10px;'></div>", unsafe_allow_html=True)
 
 # Add caching for the state machine
 
@@ -389,6 +436,7 @@ def initialize_state_machine():
             handle_error("Failed to initialize state machine", e)
 
 def initialize_conversation(content: str, interrupt_before: bool, thread_id: str, is_new_thread: bool):
+    logger.info(f"Initializing conversation: thread_id={thread_id}, is_new={is_new_thread}")
     """Initialize conversation with either new content or existing thread."""
     with st.spinner("Initializing conversation..."):
         try:
@@ -425,7 +473,9 @@ def initialize_conversation(content: str, interrupt_before: bool, thread_id: str
             st.success("Conversation started successfully!")
             time.sleep(1)
             st.rerun()
+            logger.info(f"Conversation initialized successfully: thread_id={thread_id}")
         except Exception as e:
+            logger.error(f"Conversation initialization failed: {e}", exc_info=True)
             handle_error("Error starting conversation", e)
 
 def handle_continue():
@@ -494,7 +544,7 @@ def handle_error(message: str, error: Exception):
 def add_custom_styles():
     st.markdown("""
         <style>
-        /* Message box styling */
+        /* Existing styles */
         .stTextArea textarea {
             background: rgba(255, 255, 255, 0.05);
             border: 1px solid rgba(0, 0, 0, 0.1);
@@ -515,13 +565,38 @@ def add_custom_styles():
             width: 200px;
             text-align: center;
         }
-        
         .stButton button:hover {
             transform: translateY(-2px);
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
         }
         
-        /* Multiselect styling */
+        /* New chat message styles */
+        .stChatMessage {
+            background-color: rgba(240, 242, 246, 0.05) !important;
+            border: 1px solid rgba(0, 0, 0, 0.1) !important;
+            padding: 15px !important;
+            margin-bottom: 5px !important;
+            border-radius: 10px !important;
+        }
+        
+        /* Adjust chat message container spacing */
+        .stChatMessageContent {
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+        
+        /* Style the chat message avatar */
+        .stChatMessageAvatar {
+            margin-right: 10px !important;
+        }
+        
+        /* Adjust chat flow container */
+        .element-container.stChatFlow {
+            margin-bottom: -15px !important;
+            padding-bottom: 0 !important;
+        }
+        
+        /* Existing styles continued... */
         .stMultiSelect > div {
             background: rgba(255, 255, 255, 0.05);
             border-radius: 5px;
@@ -565,6 +640,12 @@ def delete_all():
     st.success("All state data deleted!")
     st.rerun()
 
+def get_text_area_height(content, min_height=50, max_height=500, line_height=42):
+    """Calculate the height of the text area based on content."""
+    lines = content.count('\n') + 1
+    height = min_height + lines * line_height
+    height = max(min_height, min(height, max_height))
+    return height
 
 if __name__ == "__main__":
     render_start_page()

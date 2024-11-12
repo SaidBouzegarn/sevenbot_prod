@@ -6,6 +6,10 @@ import PyPDF2
 from pathlib import Path
 import hmac
 from pages.CrawlandScrape import render_crawl_page
+import logging
+from datetime import datetime
+
+logger = logging.getLogger('SevenBots')
 
 # Set page config first, before any other Streamlit commands
 st.set_page_config(
@@ -209,12 +213,12 @@ if check_password():
     with col1:
         if st.button("Start", key="start_btn", use_container_width=True):
             st.session_state.page = "start"
-            st.switch_page("pages/start_page.py")
+            st.switch_page("pages/Simulation.py")
     
     with col2:
         if st.button("Crawl", key="crawl_btn", use_container_width=True):
             st.session_state.page = "crawl"
-            st.switch_page("pages/crawl_page.py")
+            st.switch_page("pages/CrawlandScrape.py")
 
     st.markdown('</div>', unsafe_allow_html=True)
 

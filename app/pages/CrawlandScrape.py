@@ -2,9 +2,12 @@ import streamlit as st
 import pandas as pd
 from scrape.news_scrapper import NewsScrapper
 import io
+from utils.logging_config import setup_cloudwatch_logging
 
+logger = setup_cloudwatch_logging('crawl_page')
 
 def render_crawl_page():
+    logger.info("Rendering crawl page")
     st.title("Website Crawler")
     
     # Split the screen into two columns
@@ -76,6 +79,8 @@ def render_crawl_page():
     
     # Start crawling button
     if st.button("Start Crawling"):
+        logger.info(f"Starting crawl for {len(all_entries)} websites")
+        
         # Combine manual and file entries
         all_entries = st.session_state.manual_entries + (file_entries if 'file_entries' in locals() else [])
         
@@ -88,6 +93,7 @@ def render_crawl_page():
         
         for i, entry in enumerate(all_entries):
             try:
+                logger.info(f"Crawling website: {entry['website_url']}")
                 status_text.text(f"Crawling {entry['website_url']}...")
                 
                 # Initialize scraper
@@ -106,9 +112,11 @@ def render_crawl_page():
                 progress = (i + 1) / len(all_entries)
                 progress_bar.progress(progress)
                 
+                logger.info(f"Successfully crawled: {entry['website_url']}")
                 st.success(f"Successfully crawled {entry['website_url']}")
                 
             except Exception as e:
+                logger.error(f"Crawl failed for {entry['website_url']}: {e}", exc_info=True)
                 st.error(f"Error crawling {entry['website_url']}: {str(e)}")
                 continue
         

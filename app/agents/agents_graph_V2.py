@@ -112,11 +112,9 @@ class Level1Agent(BaseAgent):
             agent_name = self.name
         if mode == "research":
             return HumanMessage(content=f"""{agent_name} message  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} -
-                                
                                  researching information {content}, will respond after research is complete""")
         else:
             return HumanMessage(content=f"""{agent_name} message  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - 
-                                
                                 {content}""")
     
     def level1_node(self, state):
@@ -415,16 +413,13 @@ class Level3Agent(BaseAgent):
 
         if mode == "research_information":
             return HumanMessage(content=f"""{agent_name} message  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} -
-                                
                                 researching information : {content}, will respond after research is complete""")
         elif mode == "write_to_digest":
             return HumanMessage(content=f"""{agent_name} message  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - 
-                                
                                 writing to digest: {content}""")
         
         elif mode == "communicate_with_directors" or mode == "communicate_with_executives":
-            return HumanMessage(content=f"""{agent_name} message  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - 
-                                
+            return HumanMessage(content=f"""{agent_name} message  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} -  
                                 {content}""")
     
     def ceo_node(self, state) -> Dict[str, Any]:
