@@ -220,8 +220,12 @@ Resources:
                 aws s3 cp s3://sevenbluebots/sevenbluebots.zip . --quiet
                 unzip -q sevenbluebots.zip
                 rm sevenbluebots.zip
+                # Add full read/write/execute permissions for the entire app directory
+                chmod -R 777 /data/SEVENBOT_PROD
             else
                 cd SEVENBOT_PROD
+                # Ensure permissions are set even for existing installation
+                chmod -R 777 /data/SEVENBOT_PROD
             fi
 
             # Optimize pip installations

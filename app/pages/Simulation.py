@@ -39,6 +39,7 @@ def initialize_database():
     except Exception as e:
         logger.error(f"Database initialization failed: {e}", exc_info=True)
 
+@st.cache_data(ttl=300)  # Cache for 5 minutes
 def get_user_threads(username: str) -> List[tuple]:
     """Retrieves all thread_ids and their creation dates for a given user."""
     try:
@@ -93,6 +94,7 @@ def add_new_thread(username: str, thread_id: str):
         if 'conn' in locals():
             conn.close()
 
+@st.cache_data
 def read_pdf(uploaded_file) -> str:
     try:
         pdf_reader = PyPDF2.PdfReader(uploaded_file)
@@ -413,10 +415,8 @@ def render_conversation_messages(key, only_content=False):
             # Reduce spacing between messages
             st.markdown("<div style='margin-bottom: -10px;'></div>", unsafe_allow_html=True)
 
-# Add caching for the state machine
-
-#@st.cache_resource
-
+# Cache the state machine creation
+@st.cache_resource
 def get_shared_state_machine(interrupt_before: bool = True):
     """Create a single StateMachine instance shared across all sessions"""
     logger.info(f"Creating new shared StateMachine instance with interrupt_before={interrupt_before}")

@@ -8,6 +8,8 @@ from utils.logging_config import setup_cloudwatch_logging
 
 logger = setup_cloudwatch_logging('prompts_page')
 
+# Cache agent and file listings
+@st.cache_data(ttl=60)  # Cache for 1 minute
 def get_all_agents():
     """Get all agent names from all levels"""
     try:
@@ -15,10 +17,8 @@ def get_all_agents():
         prompts_dir = Path(__file__).resolve().parent.parent / "Data" / "Prompts"
         agents = set()
         
-        # Walk through all level directories
         for level_dir in prompts_dir.glob("level*"):
             if level_dir.is_dir():
-                # Add all agent directories
                 for agent_dir in level_dir.iterdir():
                     if agent_dir.is_dir():
                         agents.add(agent_dir.name)
@@ -28,33 +28,31 @@ def get_all_agents():
         logger.error(f"Error getting agents: {e}", exc_info=True)
         return []
 
+@st.cache_data(ttl=60)  # Cache for 1 minute
 def get_agent_files(agent_name):
     """Get all .j2 and .json files for a specific agent across all levels"""
     try:
         prompts_dir = Path(__file__).resolve().parent.parent / "Data" / "Prompts"
         files = []
         
-        # Search in all level directories
         for level_dir in prompts_dir.glob("level*"):
             agent_dir = level_dir / agent_name
             if agent_dir.exists():
-                # Get all .j2 and .json files
                 files.extend(list(agent_dir.glob("*.j2")))
                 files.extend(list(agent_dir.glob("*.json")))
         
-        # Return list of tuples (file_path, level/agent/filename)
         return [(f, f"{f.parent.parent.name}/{f.parent.name}/{f.name}") for f in files]
     except Exception as e:
         logger.error(f"Error getting files for agent {agent_name}: {e}")
         return []
 
+@st.cache_data
 def read_file_content(file_path):
     """Read content from .j2 or .json file"""
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
             if file_path.suffix == '.json':
-                # Pretty print JSON
                 return json.dumps(json.loads(content), indent=2)
             return content
     except Exception as e:

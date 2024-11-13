@@ -6,6 +6,18 @@ from utils.logging_config import setup_cloudwatch_logging
 
 logger = setup_cloudwatch_logging('crawl_page')
 
+# Cache file reading for uploaded files
+@st.cache_data
+def read_uploaded_file(uploaded_file):
+    try:
+        if uploaded_file.name.endswith('.csv'):
+            return pd.read_csv(uploaded_file)
+        else:
+            return pd.read_excel(uploaded_file)
+    except Exception as e:
+        st.error(f"Error reading file: {str(e)}")
+        return None
+
 def render_crawl_page():
     logger.info("Rendering crawl page")
     st.title("Website Crawler")
@@ -61,10 +73,7 @@ def render_crawl_page():
         
         if uploaded_file is not None:
             try:
-                if uploaded_file.name.endswith('.csv'):
-                    df = pd.read_csv(uploaded_file)
-                else:
-                    df = pd.read_excel(uploaded_file)
+                df = read_uploaded_file(uploaded_file)
                 
                 st.dataframe(df)
                 
