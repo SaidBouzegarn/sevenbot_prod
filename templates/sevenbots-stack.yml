@@ -19,7 +19,7 @@ Parameters:
     Description: CIDR block for public subnet 2
   AmiId:
     Type: AWS::EC2::Image::Id
-    Default: 'ami-069d1ea6bc64443f0'
+    Default: 'ami-07db896e164bc4476'
     Description: 'AMI ID for SevenBots instances'
 
 Resources:
@@ -120,24 +120,57 @@ Resources:
           ToPort: -1
           CidrIp: 0.0.0.0/0
 
-  DataVolume:
-    Type: AWS::EC2::Volume
+  # Add EFS Security Group
+  EFSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
     Properties:
-      AvailabilityZone: !Select [0, !GetAZs '']
-      Size: 50  # GB
-      VolumeType: gp3
-      Encrypted: true
+      GroupDescription: Security group for EFS mount targets
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          SourceSecurityGroupId: !Ref SevenBotsSecurityGroup
       Tags:
         - Key: Name
-          Value: SevenBotsDataVolume
+          Value: SevenBotsEFSSecurityGroup
+
+  # Create EFS File System
+  SevenBotsFileSystem:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      Encrypted: true
+      PerformanceMode: maxIO
+      ThroughputMode: bursting
+
+
+  # Create Mount Targets in each subnet
+  MountTarget1:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref SevenBotsFileSystem
+      SubnetId: !Ref PublicSubnet1
+      SecurityGroups:
+        - !Ref EFSSecurityGroup
+
+  MountTarget2:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref SevenBotsFileSystem
+      SubnetId: !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref EFSSecurityGroup
 
   SevenBotsLaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
+    DependsOn: 
+      - MountTarget1
+      - MountTarget2
     Properties:
       LaunchTemplateName: SevenBotsLaunchTemplate
       LaunchTemplateData:
         ImageId: !Ref AmiId
-        InstanceType: t3.medium
+        InstanceType: t3.xlarge
         KeyName: !Ref KeyName
         SecurityGroupIds:
           - !Ref SevenBotsSecurityGroup
@@ -148,77 +181,64 @@ Resources:
             #!/bin/bash
             set -e
             
-            # Install AWS CLI and system dependencies
-            sudo yum update -y
-            sudo yum install -y gcc openssl-devel bzip2-devel libffi-devel wget tar make git unzip aws-cli
+            # Configure apt for faster downloads
+            echo 'Acquire::http::Pipeline-Depth "5";' >> /etc/apt/apt.conf.d/99parallel-downloads
+            echo 'Acquire::http::Parallel-Queue-Size "5";' >> /etc/apt/apt.conf.d/99parallel-downloads
+            
+            # Update and install base packages with optimized settings
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get install -y \
+              python3-pip python3-venv unzip wget git nfs-common aria2
 
-            # Install Python 3.9 from source
-            cd /opt
-            wget https://www.python.org/ftp/python/3.9.16/Python-3.9.16.tgz
-            tar xzf Python-3.9.16.tgz
-            cd Python-3.9.16
-            ./configure --enable-optimizations
-            make altinstall
-            ln -sf /usr/local/bin/python3.9 /usr/bin/python3
-            ln -sf /usr/local/bin/pip3.9 /usr/bin/pip3
+            # Install AWS CLI using aria2 for faster download
+            aria2c "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            unzip -q awscliv2.zip
+            sudo ./aws/install
+            rm -rf aws awscliv2.zip
 
-            # Attach and mount data volume
-            INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
-            VOLUME_ID="${DataVolume}"
-            DEVICE="/dev/xvdf"
-            
-            # Wait for volume to be available
-            aws ec2 wait volume-available \
-              --volume-ids $VOLUME_ID \
-              --region ${AWS::Region}
-            
-            # Attach volume
-            aws ec2 attach-volume \
-              --volume-id $VOLUME_ID \
-              --instance-id $INSTANCE_ID \
-              --device $DEVICE \
-              --region ${AWS::Region}
-            
-            # Wait for device to be available
-            while [ ! -e $DEVICE ]; do
-              echo "Waiting for device $DEVICE to be available..."
-              sleep 5
+            # Wait for EFS mount targets to be available
+            echo "Waiting for EFS mount targets to be available..."
+            aws efs describe-mount-targets --file-system-id ${SevenBotsFileSystem} --region ${AWS::Region} \
+              --query 'MountTargets[*].LifeCycleState' --output text | grep -q "available"
+            while [ $? -ne 0 ]; do
+              sleep 10
+              aws efs describe-mount-targets --file-system-id ${SevenBotsFileSystem} --region ${AWS::Region} \
+                --query 'MountTargets[*].LifeCycleState' --output text | grep -q "available"
             done
-            
-            # Format if needed and mount
-            if ! blkid $DEVICE; then
-              mkfs -t xfs $DEVICE
-            fi
-            
+            echo "EFS mount targets are available"
+
+            # Mount EFS
             mkdir -p /data
-            mount $DEVICE /data
-            echo "$DEVICE /data xfs defaults,nofail 0 2" >> /etc/fstab
+            echo "${SevenBotsFileSystem}.efs.${AWS::Region}.amazonaws.com:/ /data nfs4 nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport,noatime 0 0" >> /etc/fstab
+            mount -a
 
             # Setup application directory
             cd /data
             if [ ! -d "SEVENBOT_PROD" ] || [ -z "$(ls -A SEVENBOT_PROD)" ]; then
                 mkdir -p SEVENBOT_PROD
                 cd SEVENBOT_PROD
-                aws s3 cp s3://sevenbluebots/sevenbluebots.zip .
-                unzip sevenbluebots.zip
+                aws s3 cp s3://sevenbluebots/sevenbluebots.zip . --quiet
+                unzip -q sevenbluebots.zip
                 rm sevenbluebots.zip
-
             else
                 cd SEVENBOT_PROD
             fi
 
-            # Create and activate virtual environment
-            sudo rm -rf venv
+            # Optimize pip installations
             python3 -m venv venv
             source venv/bin/activate
+            pip install --no-cache-dir --upgrade pip
+            pip install --no-cache-dir -r requirements.txt
 
-            # Install Python dependencies in virtual environment
-            pip install --upgrade pip
-            pip install -r requirements.txt
-
-            # Install Playwright in virtual environment
-            pip install playwright
-            playwright install --with-deps
+            # Install Playwright and dependencies
+            pip install --no-cache-dir playwright
+            playwright install --with-deps chromium
+            
+            # Install Playwright system dependencies efficiently
+            DEBIAN_FRONTEND=noninteractive apt-get install -y \
+                libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
+                libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
+                libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2
 
             # Create systemd service for Streamlit
             cat > /etc/systemd/system/streamlit.service << EOF
@@ -230,7 +250,7 @@ Resources:
             User=root
             WorkingDirectory=/data/SEVENBOT_PROD/app
             Environment=PATH=/data/SEVENBOT_PROD/venv/bin
-            ExecStart=/data/SEVENBOT_PROD/venv/bin/streamlit run app/Home.py --server.port 8501 --server.address 0.0.0.0 --server.enableCORS false
+            ExecStart=/data/SEVENBOT_PROD/venv/bin/streamlit run Home.py --server.port 8501 --server.address 0.0.0.0
             Restart=always
 
             [Install]
@@ -243,40 +263,44 @@ Resources:
             systemctl enable streamlit
 
             # Setup CloudWatch Logging
-            yum install -y awslogs
+            # Install CloudWatch agent
+            wget https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
+            sudo dpkg -i amazon-cloudwatch-agent.deb
+            rm amazon-cloudwatch-agent.deb
             
-            cat > /etc/awslogs/awscli.conf << EOF
-            [plugins]
-            cwlogs = cwlogs
-            [default]
-            region = ${AWS::Region}
+            # Configure CloudWatch agent
+            cat > /opt/aws/amazon-cloudwatch-agent/bin/config.json << EOF
+            {
+              "logs": {
+                "logs_collected": {
+                  "files": {
+                    "collect_list": [
+                      {
+                        "file_path": "/var/log/syslog",
+                        "log_group_name": "/sevenbots/system",
+                        "log_stream_name": "{instance_id}/system-logs"
+                      },
+                      {
+                        "file_path": "/var/log/streamlit.log",
+                        "log_group_name": "/sevenbots/application",
+                        "log_stream_name": "{instance_id}/streamlit"
+                      },
+                      {
+                        "file_path": "/var/log/cloud-init-output.log",
+                        "log_group_name": "/sevenbots/deployment",
+                        "log_stream_name": "{instance_id}/user-data"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
             EOF
-            
-            cat > /etc/awslogs/awslogs.conf << EOF
-            [general]
-            state_file = /var/lib/awslogs/agent-state
-            
-            [/var/log/messages]
-            datetime_format = %b %d %H:%M:%S
-            file = /var/log/messages
-            log_stream_name = {instance_id}/system-logs
-            log_group_name = /sevenbots/system
-            
-            [/var/log/streamlit.log]
-            datetime_format = %Y-%m-%d %H:%M:%S
-            file = /var/log/streamlit.log
-            log_stream_name = {instance_id}/streamlit
-            log_group_name = /sevenbots/application
-            
-            [/var/log/user-data.log]
-            datetime_format = %Y-%m-%d %H:%M:%S
-            file = /var/log/user-data.log
-            log_stream_name = {instance_id}/user-data
-            log_group_name = /sevenbots/deployment
-            EOF
-            
-            systemctl start awslogsd
-            systemctl enable awslogsd
+
+            # Start CloudWatch agent
+            sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/bin/config.json
+            sudo systemctl start amazon-cloudwatch-agent
+            sudo systemctl enable amazon-cloudwatch-agent
 
   SevenBotsTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
@@ -298,7 +322,6 @@ Resources:
 
   SevenBotsAutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
-    DependsOn: DataVolume
     Properties:
       VPCZoneIdentifier:
         - !Ref PublicSubnet1
@@ -399,6 +422,28 @@ Resources:
                   - ec2:DescribeVolumeStatus
                   - ec2:DescribeVolumeAttribute
                 Resource: '*'
+        - PolicyName: EFSAccessPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - elasticfilesystem:ClientMount
+                  - elasticfilesystem:ClientWrite
+                  - elasticfilesystem:ClientRootAccess
+                  - elasticfilesystem:DescribeMountTargets
+                  - elasticfilesystem:DescribeFileSystems
+                  - elasticfilesystem:DescribeAccessPoints
+                  - elasticfilesystem:CreateAccessPoint
+                  - elasticfilesystem:DeleteAccessPoint
+                Resource: 
+                  - !Sub "arn:aws:elasticfilesystem:${AWS::Region}:${AWS::AccountId}:file-system/${SevenBotsFileSystem}"
+                  - !Sub "arn:aws:elasticfilesystem:${AWS::Region}:${AWS::AccountId}:access-point/*"
+              - Effect: Allow
+                Action:
+                  - elasticfilesystem:DescribeMountTargets
+                  - elasticfilesystem:DescribeFileSystems
+                Resource: "*"
 
   SevenBotsInstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -437,122 +482,14 @@ Resources:
                   - logs:PutLogEvents
                   - logs:DescribeLogGroups
                   - logs:DescribeLogStreams
+                  - logs:PutRetentionPolicy
                 Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/vpc/flowlogs/${AWS::StackName}:*'
 
   VPCFlowLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub '/aws/vpc/flowlogs/${AWS::StackName}'
-      RetentionInDays: 30  # Adjust retention as needed
-
-  # Lambda for creating snapshots
-  SnapshotLambda:
-    Type: AWS::Lambda::Function
-    Properties:
-      Handler: index.lambda_handler
-      Role: !GetAtt SnapshotLambdaRole.Arn
-      Code:
-        ZipFile: |
-          import boto3
-          import datetime
-          
-          def lambda_handler(event, context):
-              ec2 = boto3.client('ec2')
-              
-              # Get volume ID from environment variable
-              volume_id = event['volume_id']
-              
-              # Create snapshot
-              snapshot = ec2.create_snapshot(
-                  VolumeId=volume_id,
-                  Description=f'Automated backup of {volume_id} - {datetime.datetime.now().strftime("%Y-%m-%d")}'
-              )
-              
-              # Add tags to snapshot
-              ec2.create_tags(
-                  Resources=[snapshot['SnapshotId']],
-                  Tags=[
-                      {'Key': 'Name', 'Value': 'SevenBotsBackup'},
-                      {'Key': 'AutoDelete', 'Value': 'true'},
-                      {'Key': 'CreatedBy', 'Value': 'AutomatedBackup'}
-                  ]
-              )
-              
-              # Delete old snapshots (keep last 4 weeks)
-              snapshots = ec2.describe_snapshots(
-                  Filters=[
-                      {'Name': 'volume-id', 'Values': [volume_id]},
-                      {'Name': 'tag:AutoDelete', 'Values': ['true']}
-                  ]
-              )
-              
-              # Sort snapshots by date
-              sorted_snapshots = sorted(
-                  snapshots['Snapshots'],
-                  key=lambda x: x['StartTime'],
-                  reverse=True
-              )
-              
-              # Keep only last 4 snapshots
-              for snap in sorted_snapshots[4:]:
-                  ec2.delete_snapshot(SnapshotId=snap['SnapshotId'])
-              
-              return {
-                  'statusCode': 200,
-                  'body': f"Created snapshot {snapshot['SnapshotId']}"
-              }
-      Runtime: python3.9
-      Timeout: 300
-      Environment:
-        Variables:
-          VOLUME_ID: !Ref DataVolume
-
-  # IAM Role for Lambda
-  SnapshotLambdaRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: SnapshotPolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ec2:CreateSnapshot
-                  - ec2:DeleteSnapshot
-                  - ec2:CreateTags
-                  - ec2:DescribeSnapshots
-                Resource: '*'
-
-  # EventBridge rule to trigger weekly backups
-  SnapshotScheduleRule:
-    Type: AWS::Events::Rule
-    Properties:
-      Description: "Trigger weekly snapshots of SevenBots data volume"
-      ScheduleExpression: "cron(0 0 ? * SUN *)"  # Every Sunday at midnight
-      State: ENABLED
-      Targets:
-        - Arn: !GetAtt SnapshotLambda.Arn
-          Id: "SnapshotTarget"
-          Input: !Sub '{"volume_id": "${DataVolume}"}'
-
-  # Permission for EventBridge to invoke Lambda
-  SnapshotLambdaPermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      FunctionName: !Ref SnapshotLambda
-      Action: lambda:InvokeFunction
-      Principal: events.amazonaws.com
-      SourceArn: !GetAtt SnapshotScheduleRule.Arn
+      RetentionInDays: 14  # Adjust retention as needed
 
 Outputs:
   LoadBalancerDNSName:

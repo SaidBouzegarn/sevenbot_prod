@@ -56,6 +56,9 @@ def render_crawl_page():
         st.header("File Upload")
         uploaded_file = st.file_uploader("Upload CSV or Excel file", type=['csv', 'xlsx'])
         
+        # Initialize file_entries as empty list
+        file_entries = []
+        
         if uploaded_file is not None:
             try:
                 if uploaded_file.name.endswith('.csv'):
@@ -82,7 +85,7 @@ def render_crawl_page():
         logger.info(f"Starting crawl for {len(all_entries)} websites")
         
         # Combine manual and file entries
-        all_entries = st.session_state.manual_entries + (file_entries if 'file_entries' in locals() else [])
+        all_entries = st.session_state.manual_entries + file_entries
         
         if not all_entries:
             st.warning("No websites to crawl. Please add websites manually or upload a file.")
