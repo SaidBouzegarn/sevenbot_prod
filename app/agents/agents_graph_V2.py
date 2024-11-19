@@ -999,7 +999,7 @@ if __name__ == "__main__":
 
     logger.info("About to create StateMachines instance")
     try:
-        state_machines = StateMachines("app/Data/Prompts")
+        state_machines = StateMachines("Data/Prompts")
         logger.info("StateMachines instance created successfully")
     except Exception as e:
         logger.error(f"Error creating StateMachines instance: {str(e)}", exc_info=True)
