@@ -8,6 +8,7 @@ duckduckgo_search==6.3.2
 fireworks-ai==0.15.7
 groq==0.11.0
 huggingface-hub==0.26.1
+jinja2==3.1.4
 langchain==0.3.4
 langchain-anthropic==0.2.3
 langchain-cohere==0.3.1
@@ -30,11 +31,15 @@ pandas==2.2.3
 pillow==10.4.0
 playwright==1.42.0
 playwright-stealth==1.0.6
+py2neo==2024.1.0
 pydantic==2.9.2
 PyPDF2==3.0.1
 python-dotenv==1.0.1
 requests==2.32.3
 streamlit==1.39.0
+tqdm==4.66.5
 watchtower==3.0.1
 tokenizers==0.20.1
 transformers==4.46.0
+playwright_stealth
+tenacity
