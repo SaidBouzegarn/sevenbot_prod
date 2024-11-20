@@ -22,10 +22,11 @@ def read_uploaded_file(uploaded_file):
 
 def install_playwright_browsers():
     """
-    Installs Playwright browsers if they are not already installed.
+    Installs Playwright browsers and their dependencies if they are not already installed.
     """
     try:
         logger.info("Installing Playwright browsers...")
+        # Install Playwright browsers
         result = subprocess.run(
             ["playwright", "install"],
             check=True,
@@ -34,16 +35,28 @@ def install_playwright_browsers():
             text=True
         )
         logger.info("Playwright browsers installed successfully.")
+
+        # Install Playwright dependencies
+        logger.info("Installing Playwright dependencies...")
+        result_deps = subprocess.run(
+            ["sudo", "playwright", "install-deps"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        logger.info("Playwright dependencies installed successfully.")
+
     except subprocess.CalledProcessError as e:
-        logger.error(f"Failed to install Playwright browsers: {e.stderr}")
-        st.error("Failed to install Playwright browsers. Please check the logs for more details.")
+        logger.error(f"Failed to install Playwright: {e.stderr}")
+        st.error("Failed to install Playwright browsers or dependencies. Please check the logs for more details.")
         sys.exit(1)
 
 def render_crawl_page():
     logger.info("Rendering crawl page")
     st.title("Website Crawler")
     
-    # Ensure Playwright browsers are installed
+    # Ensure Playwright browsers and dependencies are installed
     install_playwright_browsers()
     
     # Split the screen into two columns
