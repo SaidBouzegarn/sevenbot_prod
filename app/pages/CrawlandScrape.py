@@ -39,7 +39,7 @@ def install_playwright_browsers():
         # Install Playwright dependencies
         logger.info("Installing Playwright dependencies...")
         result_deps = subprocess.run(
-            ["sudo", "playwright", "install-deps"],
+            ["playwright", "install-deps"],
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
