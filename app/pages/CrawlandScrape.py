@@ -27,7 +27,7 @@ def install_playwright_browsers():
     try:
         logger.info("Installing Playwright browsers...")
         result = subprocess.run(
-            ["playwright", "install", "chromium"],
+            ["playwright", "install"],
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
