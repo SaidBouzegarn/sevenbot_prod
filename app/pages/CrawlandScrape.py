@@ -91,10 +91,11 @@ def render_crawl_page():
     
     # Start crawling button
     if st.button("Start Crawling"):
-        logger.info(f"Starting crawl for {len(all_entries)} websites")
-        
-        # Combine manual and file entries
+        # Combine manual and file entries first
         all_entries = st.session_state.manual_entries + file_entries
+
+        # Now log the number of entries
+        logger.info(f"Starting crawl for {len(all_entries)} websites")
         
         if not all_entries:
             st.warning("No websites to crawl. Please add websites manually or upload a file.")
