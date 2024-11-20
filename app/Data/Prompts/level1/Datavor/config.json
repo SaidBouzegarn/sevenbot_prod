@@ -1,0 +1,13 @@
+{
+  "llm_model": "gpt-4o",
+  "llm_config": {
+    "temperature": 0.6,
+    "max_tokens": 600
+  },
+  "assistant_llm_model": "gpt-4o-mini",
+  "assistant_llm_config": {
+    "temperature": 0.3,
+    "max_tokens": 600
+  },
+  "supervisor_name": "supervisor2"
+}

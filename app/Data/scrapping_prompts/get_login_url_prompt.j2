@@ -1,0 +1,28 @@
+Your task is to analyze a list of URLs from a website's landing page and identify the login page URL. Please follow these guidelines:
+
+1. Look for URLs containing keywords related to authentication such as:
+   - "login", "signin", "sign-in", "auth", "account"
+   - Common variations like "log-in", "log_in", etc.
+
+2. Consider URL patterns typical of login pages:
+   - Short paths (/login, /signin)
+   - Location in URL structure (often top-level)
+   - Authentication-related parameters
+
+3. Analyze the full URL structure:
+   - Path indicates user authentication purpose
+   - Avoid similar but unrelated pages (e.g. "login-help")
+
+Input URLs:
+{{ urls }}
+
+Please analyze carefully to avoid bot honeypots:
+- Avoid overly simple URLs like "example.com/login" that don't match the site's domain
+- Prefer login URLs that include the actual website domain (e.g. "website.com/auth/login")
+- Look for login pages that follow the site's established URL patterns
+- Be suspicious of login endpoints that seem disconnected from the main domain
+- Consider if the URL structure matches other authenticated sections of the site
+- If a login URL is found: Return only that single URL as a string
+- If no login URL is found: Return one string containing "None"
+
+Do not provide any additional commentary or explanation.

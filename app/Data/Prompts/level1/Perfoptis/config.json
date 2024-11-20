@@ -1,0 +1,13 @@
+{
+  "llm_model": "gpt-3.5-turbo",
+  "llm_config": {
+    "temperature": 0.6,
+    "max_tokens": 600
+  },
+  "assistant_llm_model": "gpt-3.5-turbo",
+  "assistant_llm_config": {
+    "temperature": 0.4,
+    "max_tokens": 300
+  },
+  "supervisor_name": "supervisor1"
+}

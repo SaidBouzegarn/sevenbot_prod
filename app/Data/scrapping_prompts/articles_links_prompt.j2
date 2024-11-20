@@ -1,0 +1,21 @@
+Your task is to analyze a list of URLs and identify those that are likely to be legitimate news articles while avoiding potential bot traps. Please follow these criteria:
+
+1. URL Structure Analysis:
+- Look for URLs with patterns typical of news articles (e.g., article titles in the path)
+- Avoid URLs with randomly generated strings or excessive numbers
+- Be wary of unusual TLDs that might indicate bot traps
+
+2. Content Type Evaluation:
+- Focus on URLs likely to contain full news or scientific articles
+- Exclude category pages, user-related pages, authentication pages
+- Avoid e-commerce and product pages
+
+
+Input URLs:
+{{ urls }}
+
+Please provide a filtered list of the most likely legitimate news article URLs from the input ( output list containing between 5 and 30 urls, each url is a string). Return only the URLs without additional commentary.
+DO NOT HALLUCINATE. Only list urls that are likely to be news articles and that are in the input list.
+Output format:
+    likely_urls : List[str]
+

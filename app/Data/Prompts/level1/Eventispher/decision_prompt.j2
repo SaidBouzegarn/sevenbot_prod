@@ -1,0 +1,21 @@
+Based on the information provided and your role as an executive agent, Your superiors has sent you this msg : {{ last_message }}
+
+please analyze the following context and make a decision in order to either answer the question or ask for more information to be able to provide a response:
+
+Context:
+- ongoing meeting: {{ conversation }}
+- Recent assistant conversation: {{ assistant_conversation }}
+
+Available tools:
+{% for tool in tools %}
+- {{ tool.name }}: {{ tool.description }}
+{% endfor %}
+
+Please provide your decision in the following format:
+{
+    "reasoning": "Your detailed explanation for the decision, including your assessment of the current information and any identified knowledge gaps",
+    "decision": "search_more_information" or "converse_with_superiors",
+    "content": ["If 'search_more_information': List of strings representing questions for your assistant, each string containing a suggested tool to use. Remember you can ask assistant to query the knowledge graph by providing the what to query for. If 'converse_with_superiors': list containing only The message to send to your superiors. The message should provide an answer to the topic or questions asked by superiors"]
+}
+
+Remember to consider the completeness of the information, the complexity of the situation, and the potential need for additional research before making your decision.

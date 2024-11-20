@@ -1,0 +1,33 @@
+Your task is to analyze the cleaned HTML of a login page and identify the CSS selectors for the username field, password field, and login submit button. Please follow these guidelines:
+
+1. Examine the HTML structure to locate the login form elements:
+   - Look for input fields that could be used for username or email
+   - Look for input fields that appear to be for password entry
+   - Look for buttons or input elements that seem to submit the login form
+
+2. Identify unique selectors for each element:
+   - Use IDs, class names, name attributes, or combinations of attributes
+   - Ensure the selectors are as precise as possible to avoid conflicts
+   - Be prepared for non-standard naming conventions
+
+3. Consider various possibilities for login elements:
+   - Username fields might use terms like "username", "email", "user", "login", etc.
+   - Password fields might use "password", "pwd", "pass", etc.
+   - Submit buttons could be labeled with "login", "sign in", "submit", "go", etc.
+
+4. Look beyond conventional naming:
+   - Be aware that some websites may use arbitrary or obfuscated names for these elements
+   - Pay attention to the context and position of elements within the form structure
+
+Input HTML:
+{{ html }}
+
+Please provide the CSS selectors in the following format:
+{
+    "username_selector": "CSS selector for username/email field",
+    "password_selector": "CSS selector for password field",
+    "submit_button_selector": "CSS selector for login submit button",
+    "comment": string # small comment on how provided html can be cleaned more to facilitate task and reduce token usage. [no more than 5 sentences]
+}
+
+Ensure that each selector is unique and correctly identifies the intended element. If multiple potential selectors exist for an element, choose the most specific and reliable option. Do not provide any additional commentary or explanation.

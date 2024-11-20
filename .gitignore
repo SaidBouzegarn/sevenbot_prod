@@ -7,8 +7,6 @@ app/logs/
 # Ignore virtual environment folder
 venv/
 
-app/data/
-
 .streamlit/secrets.toml
 # Python-specific ignores
 __pycache__/

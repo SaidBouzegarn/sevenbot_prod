@@ -1,0 +1,30 @@
+Your task is to analyze the provided cleaned HTML content and determine if it represents a news article. Please follow these guidelines:
+
+1. Classification Criteria:
+   - Identify if the page contains a complete, single news article
+   - Look for typical article elements (title, author, publication date, article body)
+   - Distinguish from non-article pages (landing pages, category listings, login forms, help pages)
+
+2. Content Analysis:
+   - Verify the content focuses on news, current events, or developments in any field
+   - Check for journalistic structure and professional writing style
+   - Ensure the content is complete and not just a preview or summary
+
+3. Page Type Identification:
+   - News Article: A full, self-contained article about any newsworthy topic
+   - Non-Article: Landing pages, category pages, login pages, help sections, contact pages, etc.
+
+Cleaned HTML Content:
+{{ cleaned_html }}
+
+Please provide your analysis in the following format:
+{
+    "classification": boolean,  # True if news article, False otherwise
+    "title": string,       # Article title if classification is True, empty if False
+    "author": string,      # Author name if classification is True, empty if False
+    "body": string,        # Full article text if classification is True, empty if False
+    "date_published": string  # Publication date if classification is True, empty if False
+    "comment": string # small comment on how provided html can be cleaned more to facilitate task and reduce token usage. [no more than 5 sentences]
+}
+
+Provide only the structured output without additional commentary.

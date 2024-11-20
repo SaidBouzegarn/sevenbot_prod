@@ -1,0 +1,13 @@
+{
+  "llm_model": "gpt-4",
+  "llm_config": {
+    "temperature": 0.7,
+    "max_tokens": 800
+  },
+  "assistant_llm_model": "gpt-3.5-turbo",
+  "assistant_llm_config": {
+    "temperature": 0.5,
+    "max_tokens": 400
+  },
+  "subordinates": ["Perfoptis", "Zeronome"]
+}
