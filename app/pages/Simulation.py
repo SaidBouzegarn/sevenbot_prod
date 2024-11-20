@@ -420,7 +420,7 @@ def render_conversation_messages(key, only_content=False):
 def get_shared_state_machine(interrupt_before: bool = True):
     """Create a single StateMachine instance shared across all sessions"""
     logger.info(f"Creating new shared StateMachine instance with interrupt_before={interrupt_before}")
-    prompts_dir = os.path.join("Data", "Prompts")
+    prompts_dir = os.path.join("..", "Data", "Prompts")
     return StateMachines(str(prompts_dir).strip(), interrupt_before)
 
 def initialize_state_machine():
