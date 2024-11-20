@@ -3,6 +3,8 @@ import pandas as pd
 from scrape.news_scrapper import NewsScrapper
 import io
 from utils.logging_config import setup_cloudwatch_logging
+import subprocess
+import sys
 
 logger = setup_cloudwatch_logging('crawl_page')
 
@@ -18,9 +20,31 @@ def read_uploaded_file(uploaded_file):
         st.error(f"Error reading file: {str(e)}")
         return None
 
+def install_playwright_browsers():
+    """
+    Installs Playwright browsers if they are not already installed.
+    """
+    try:
+        logger.info("Installing Playwright browsers...")
+        result = subprocess.run(
+            ["playwright", "install", "chromium"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        logger.info("Playwright browsers installed successfully.")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to install Playwright browsers: {e.stderr}")
+        st.error("Failed to install Playwright browsers. Please check the logs for more details.")
+        sys.exit(1)
+
 def render_crawl_page():
     logger.info("Rendering crawl page")
     st.title("Website Crawler")
+    
+    # Ensure Playwright browsers are installed
+    install_playwright_browsers()
     
     # Split the screen into two columns
     left_col, right_col = st.columns(2)
