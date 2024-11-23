@@ -20,7 +20,6 @@ from langchain_community.cache import InMemoryCache
 from langchain_mistralai import ChatMistralAI
 from langchain_cohere import ChatCohere
 from langchain_groq import ChatGroq
-from langchain_google_vertexai import ChatVertexAI
 from langchain_anthropic import ChatAnthropic
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
 from langchain_fireworks import ChatFireworks
@@ -97,8 +96,6 @@ class BaseAgent:
             llm = ChatCohere(model=llm_name, **llm_params)
         elif llm_name in GROQ_MODELS:
             llm = ChatGroq(model=llm_name, **llm_params)
-        elif llm_name in VERTEXAI_MODELS:
-            llm = ChatVertexAI(model_name=llm_name, **llm_params)
         elif llm_name in OLLAMA_MODELS:
             llm = ChatOllama(model=llm_name, **llm_params)
         elif llm_name in NVIDIA_MODELS:
